@@ -135,9 +135,9 @@ Migrations run **automatically on server startup** via `pgx`. A `databasechangel
 | `name`       | VARCHAR(255) | Item name                      |
 | `description`| TEXT         | Item description               |
 | `created_at` | TIMESTAMP    | Auto-set on creation           |
-| `modified_at`| TIMESTAMP    | Set on modification            |
+| `modified_at`| TIMESTAMP    | Set on modification (NULL on create) |
 | `created_by` | VARCHAR(255) | Audit field (default: "System")|
-| `modified_by` | VARCHAR(255) | Audit field (default: "System")|
+| `modified_by`| VARCHAR(255) | Audit field (NULL on create)   |
 | `is_deleted` | BOOLEAN      | Soft delete flag               |
 
 ## API
