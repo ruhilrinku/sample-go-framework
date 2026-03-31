@@ -62,16 +62,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize GORM using the same database URL
-	gormDB, err := gorm.Open(gormpostgres.Open(cfg.DatabaseURL), &gorm.Config{})
+	// Initialize GORM writer DB (primary)
+	writerDB, err := gorm.Open(gormpostgres.Open(cfg.DatabaseWriterURL), &gorm.Config{})
 	if err != nil {
-		logger.Error("failed to initialize GORM", "error", err)
+		logger.Error("failed to initialize GORM writer", "error", err)
 		os.Exit(1)
 	}
-	logger.Info("GORM initialized")
+	logger.Info("GORM writer initialized", "url", cfg.DatabaseWriterURL)
+
+	// Initialize GORM reader DB (replica)
+	readerDB, err := gorm.Open(gormpostgres.Open(cfg.DatabaseReaderURL), &gorm.Config{})
+	if err != nil {
+		logger.Error("failed to initialize GORM reader", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("GORM reader initialized", "url", cfg.DatabaseReaderURL)
 
 	// Hexagonal wiring
-	itemRepo := postgres.NewItemRepository(gormDB, logger)
+	itemRepo := postgres.NewItemRepository(readerDB, writerDB, logger)
 	itemSvc := service.New(itemRepo, logger)
 	itemServer := grpcadapter.NewItemServer(itemSvc, logger)
 

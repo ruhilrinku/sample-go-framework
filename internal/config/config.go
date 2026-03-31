@@ -11,6 +11,8 @@ import (
 type Config struct {
 	GRPCPort           string
 	DatabaseURL        string
+	DatabaseReaderURL  string
+	DatabaseWriterURL  string
 	LiquibaseChangelog string
 }
 
@@ -22,6 +24,16 @@ func Load() (*Config, error) {
 	dbURL := envOrProp("DATABASE_URL", "database_url", props)
 	if dbURL == "" {
 		return nil, fmt.Errorf("database_url is required (set in app.properties or DATABASE_URL env var)")
+	}
+
+	dbReaderURL := envOrProp("DATABASE_READER_URL", "database_reader_url", props)
+	if dbReaderURL == "" {
+		dbReaderURL = dbURL // fallback to primary if no reader configured
+	}
+
+	dbWriterURL := envOrProp("DATABASE_WRITER_URL", "database_writer_url", props)
+	if dbWriterURL == "" {
+		dbWriterURL = dbURL // fallback to primary if no writer configured
 	}
 
 	grpcPort := envOrProp("GRPC_PORT", "grpc_port", props)
@@ -37,6 +49,8 @@ func Load() (*Config, error) {
 	return &Config{
 		GRPCPort:           grpcPort,
 		DatabaseURL:        dbURL,
+		DatabaseReaderURL:  dbReaderURL,
+		DatabaseWriterURL:  dbWriterURL,
 		LiquibaseChangelog: lbChangelog,
 	}, nil
 }

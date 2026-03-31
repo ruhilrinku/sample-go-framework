@@ -12,13 +12,14 @@ import (
 
 // ItemRepository is the PostgreSQL adapter implementing port.ItemRepository.
 type ItemRepository struct {
-	db     *gorm.DB
-	logger *slog.Logger
+	readerDB *gorm.DB
+	writerDB *gorm.DB
+	logger   *slog.Logger
 }
 
-// NewItemRepository creates a new GORM-backed item repository.
-func NewItemRepository(db *gorm.DB, logger *slog.Logger) *ItemRepository {
-	return &ItemRepository{db: db, logger: logger.With("component", "postgres-repo")}
+// NewItemRepository creates a new GORM-backed item repository with separate reader and writer databases.
+func NewItemRepository(readerDB, writerDB *gorm.DB, logger *slog.Logger) *ItemRepository {
+	return &ItemRepository{readerDB: readerDB, writerDB: writerDB, logger: logger.With("component", "postgres-repo")}
 }
 
 // ListItems retrieves a paginated list of items from PostgreSQL.
@@ -27,14 +28,14 @@ func (r *ItemRepository) ListItems(ctx context.Context, page, pageSize int) ([]d
 
 	r.logger.DebugContext(ctx, "counting items")
 	var total int64
-	if err := r.db.WithContext(ctx).Model(&ItemDataModel{}).Where("is_deleted = ?", false).Count(&total).Error; err != nil {
+	if err := r.readerDB.WithContext(ctx).Model(&ItemDataModel{}).Where("is_deleted = ?", false).Count(&total).Error; err != nil {
 		r.logger.ErrorContext(ctx, "failed to count items", "error", err)
 		return nil, 0, domain.NewInternalError("counting items", err)
 	}
 
 	r.logger.DebugContext(ctx, "querying items", "limit", pageSize, "offset", offset)
 	var dataItems []ItemDataModel
-	if err := r.db.WithContext(ctx).
+	if err := r.readerDB.WithContext(ctx).
 		Where("is_deleted = ?", false).
 		Order("created_at DESC").
 		Limit(pageSize).
@@ -59,7 +60,7 @@ func (r *ItemRepository) CreateItem(ctx context.Context, item domain.ItemDomainM
 	r.setCreatedContext(data)
 
 	r.logger.DebugContext(ctx, "inserting item Details", "item", data)
-	if err := r.db.WithContext(ctx).Create(&data).Error; err != nil {
+	if err := r.writerDB.WithContext(ctx).Create(&data).Error; err != nil {
 		r.logger.ErrorContext(ctx, "failed to insert item", "name", data.Name, "error", err)
 		return domain.ItemDomainModel{}, domain.NewInternalError("inserting item", err)
 	}
