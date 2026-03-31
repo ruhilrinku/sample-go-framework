@@ -9,6 +9,7 @@ import (
 
 	"github.com/sample-go/item-service/internal/config"
 	"github.com/sample-go/item-service/internal/core/domain"
+	"github.com/sample-go/item-service/internal/session"
 )
 
 // ItemRepository is the PostgreSQL adapter implementing port.ItemRepository.
@@ -57,7 +58,7 @@ func (r *ItemRepository) ListItems(ctx context.Context, page, pageSize int) ([]d
 
 // CreateItem inserts a new item into PostgreSQL and returns the created item.
 func (r *ItemRepository) CreateItem(ctx context.Context, item domain.ItemDomainModel) (domain.ItemDomainModel, error) {
-	data := toDataModel(item, r.setCreatedContext())
+	data := toDataModel(item, r.setCreatedContext(ctx))
 
 	r.logger.DebugContext(ctx, "inserting item Details", "item", data)
 	if err := r.writerDB.WithContext(ctx).Create(&data).Error; err != nil {
@@ -69,9 +70,13 @@ func (r *ItemRepository) CreateItem(ctx context.Context, item domain.ItemDomainM
 	return toDomainModel(data), nil
 }
 
-func (*ItemRepository) setCreatedContext() config.BaseModel {
+func (*ItemRepository) setCreatedContext(ctx context.Context) config.BaseModel {
+	createdBy := "System"
+	if sess := session.FromContext(ctx); sess != nil && sess.UserID != "" {
+		createdBy = sess.UserID
+	}
 	return config.BaseModel{
 		CreatedAt: time.Now(),
-		CreatedBy: "System",
+		CreatedBy: createdBy,
 	}
 }

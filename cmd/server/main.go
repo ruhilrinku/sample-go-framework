@@ -27,6 +27,7 @@ import (
 	grpcadapter "github.com/sample-go/item-service/internal/adapter/driving/grpc"
 	"github.com/sample-go/item-service/internal/config"
 	"github.com/sample-go/item-service/internal/core/service"
+	"github.com/sample-go/item-service/internal/session"
 )
 
 func main() {
@@ -86,9 +87,12 @@ func main() {
 	itemSvc := service.New(itemRepo, logger)
 	itemServer := grpcadapter.NewItemServer(itemSvc, logger)
 
-	// gRPC server with recovery interceptor
+	// gRPC server with session and recovery interceptors
 	grpcServer := grpc.NewServer(
-		grpc.ChainUnaryInterceptor(recoveryInterceptor(logger)),
+		grpc.ChainUnaryInterceptor(
+			session.UnaryInterceptor(logger),
+			recoveryInterceptor(logger),
+		),
 	)
 	itemv1.RegisterItemServiceServer(grpcServer, itemServer)
 	reflection.Register(grpcServer)
@@ -110,7 +114,9 @@ func main() {
 	}()
 
 	// HTTP REST gateway (grpc-gateway reverse proxy)
-	gwMux := runtime.NewServeMux()
+	gwMux := runtime.NewServeMux(
+		runtime.WithIncomingHeaderMatcher(session.GatewayHeaderMatcher),
+	)
 	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 	if err := itemv1.RegisterItemServiceHandlerFromEndpoint(ctx, gwMux, grpcAddr, opts); err != nil {
 		logger.Error("failed to register gateway", "error", err)

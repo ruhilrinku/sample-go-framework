@@ -1,6 +1,6 @@
 # Item Service — gRPC Microservice (Hexagonal Architecture)
 
-A Go gRPC microservice built with **hexagonal (ports & adapters) architecture**, backed by **PostgreSQL** with **GORM**, **UUID v7** identifiers, structured logging, reader/writer database separation, and **gRPC-JSON REST transcoding** via grpc-gateway.
+A Go gRPC microservice built with **hexagonal (ports & adapters) architecture**, backed by **PostgreSQL** with **GORM**, **UUID v7** identifiers, structured logging, reader/writer database separation, **gRPC-JSON REST transcoding** via grpc-gateway, and a **request session interceptor** for per-request identity context.
 
 ## Tech Stack
 
@@ -44,6 +44,7 @@ Key design decisions:
 - **Reader/Writer DB separation** — Separate GORM connections for read (replica) and write (primary) operations
 - **Custom domain errors** — Typed errors (`Validation`, `NotFound`, `Internal`) mapped to gRPC status codes
 - **UUID v7** — Time-ordered UUIDs generated in the application layer via GORM `BeforeCreate` hook
+- **Request session interceptor** — Global gRPC interceptor extracts `x-tenant-id` and `x-user-id` from headers, initialises a `RequestSession` on the context, and propagates it to all downstream layers (works for both gRPC and REST transcoded calls)
 
 ## Project Structure
 
@@ -55,6 +56,7 @@ Key design decisions:
 ├── gen/pb/item/v1/                     # Generated Go protobuf/gRPC/gateway code
 ├── internal/
 │   ├── config/                         # Configuration (app.properties) & BaseModel
+│   ├── session/                        # Request session model, interceptor & header matcher
 │   ├── core/
 │   │   ├── domain/                     # Domain models & custom error types
 │   │   ├── port/                       # Port interfaces (service & repository)
@@ -142,6 +144,21 @@ Migrations run **automatically on server startup** via `pgx`. A `databasechangel
 | `modified_by`| VARCHAR(255) | Audit field (NULL on create)   |
 | `is_deleted` | BOOLEAN      | Soft delete flag               |
 
+## Request Session
+
+All API calls (gRPC and REST) require the following headers:
+
+| Header         | Description                          | Required |
+|----------------|--------------------------------------|----------|
+| `x-tenant-id`  | Tenant identifier for multi-tenancy | Yes      |
+| `x-user-id`    | User identifier for audit trails    | Yes      |
+
+Missing or empty headers return `UNAUTHENTICATED`. The session is stored on the Go context and accessible via `session.FromContext(ctx)` anywhere downstream.
+
+The `created_by` audit field on new items is automatically populated from the session's `UserID` (falls back to "System" if no session is present).
+
+This interceptor is designed for easy extension — add JWT token parsing and additional `RequestSession` fields as needed.
+
 ## API
 
 All APIs are available via both **gRPC** (port `50051`) and **REST/JSON** (port `8080`). The REST endpoints are auto-generated from the protobuf HTTP annotations using grpc-gateway.
@@ -164,6 +181,8 @@ Creates a new item. The ID (UUID v7) and metadata fields are generated server-si
 ```bash
 curl -X POST http://localhost:8080/api/v1/items \
   -H "Content-Type: application/json" \
+  -H "x-tenant-id: tenant-abc" \
+  -H "x-user-id: user-123" \
   -d '{"name": "Widget", "description": "A sample widget"}'
 ```
 
@@ -188,7 +207,8 @@ Retrieves a paginated list of items.
 
 **REST example:**
 ```bash
-curl http://localhost:8080/api/v1/items?page=1&page_size=10
+curl -H "x-tenant-id: tenant-abc" -H "x-user-id: user-123" \
+  http://localhost:8080/api/v1/items?page=1&page_size=10
 ```
 
 **Response:**
@@ -229,6 +249,7 @@ The project includes unit tests and BDD (Cucumber) narrow integration tests with
 
 - **Service layer tests** (`internal/core/service/item_service_test.go`) — 7 tests covering ListItems (success, error, page defaults, page cap) and CreateItem (success, empty name validation, repository error)
 - **gRPC adapter tests** (`internal/adapter/driving/grpc/item_server_test.go`) — 8 tests covering ListItems (success, error, empty result, not found) and CreateItem (success, empty name, service error, validation error)
+- **Session interceptor tests** (`internal/session/interceptor_test.go`) — 7 tests covering success, missing metadata, missing tenant, missing user, empty values, nil context, round-trip
 
 ### Cucumber / BDD Tests (Narrow Integration)
 
