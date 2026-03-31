@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/sample-go/item-service/internal/config"
 	"github.com/sample-go/item-service/internal/core/domain"
 )
 
@@ -56,8 +57,7 @@ func (r *ItemRepository) ListItems(ctx context.Context, page, pageSize int) ([]d
 
 // CreateItem inserts a new item into PostgreSQL and returns the created item.
 func (r *ItemRepository) CreateItem(ctx context.Context, item domain.ItemDomainModel) (domain.ItemDomainModel, error) {
-	data := toDataModel(item)
-	r.setCreatedContext(data)
+	data := toDataModel(item, r.setCreatedContext())
 
 	r.logger.DebugContext(ctx, "inserting item Details", "item", data)
 	if err := r.writerDB.WithContext(ctx).Create(&data).Error; err != nil {
@@ -69,7 +69,9 @@ func (r *ItemRepository) CreateItem(ctx context.Context, item domain.ItemDomainM
 	return toDomainModel(data), nil
 }
 
-func (*ItemRepository) setCreatedContext(data ItemDataModel) {
-	data.CreatedBy = "System"
-	data.CreatedAt = time.Now()
+func (*ItemRepository) setCreatedContext() config.BaseModel {
+	return config.BaseModel{
+		CreatedAt: time.Now(),
+		CreatedBy: "System",
+	}
 }

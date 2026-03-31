@@ -29,20 +29,20 @@ databaseChangeLog:
                   constraints:
                     nullable: false
               - column:
-                  name: updated_at
+                  name: modified_at
                   type: TIMESTAMPTZ
                   constraints:
-                    nullable: false
+                    nullable: true
               - column:
                   name: created_by
                   type: VARCHAR(255)
                   constraints:
                     nullable: false
               - column:
-                  name: updated_by
+                  name: modified_by
                   type: VARCHAR(255)
                   constraints:
-                    nullable: false
+                    nullable: true
               - column:
                   name: is_deleted
                   type: BOOLEAN

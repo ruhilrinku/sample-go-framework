@@ -5,14 +5,17 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime/debug"
 	"syscall"
 
+	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 	gormpostgres "gorm.io/driver/postgres"
@@ -90,28 +93,56 @@ func main() {
 	itemv1.RegisterItemServiceServer(grpcServer, itemServer)
 	reflection.Register(grpcServer)
 
-	addr := fmt.Sprintf(":%s", cfg.GRPCPort)
-	lis, err := net.Listen("tcp", addr)
+	grpcAddr := fmt.Sprintf(":%s", cfg.GRPCPort)
+	lis, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
-		logger.Error("failed to listen", "address", addr, "error", err)
+		logger.Error("failed to listen", "address", grpcAddr, "error", err)
 		os.Exit(1)
 	}
 
-	// Graceful shutdown
+	// Start gRPC server in background
 	go func() {
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		<-sigCh
-		logger.Info("shutting down gRPC server...")
-		grpcServer.GracefulStop()
-		cancel()
+		logger.Info("gRPC server listening", "address", grpcAddr)
+		if err := grpcServer.Serve(lis); err != nil {
+			logger.Error("gRPC server failed", "error", err)
+			os.Exit(1)
+		}
 	}()
 
-	logger.Info("gRPC server listening", "address", addr)
-	if err := grpcServer.Serve(lis); err != nil {
-		logger.Error("gRPC server failed", "error", err)
+	// HTTP REST gateway (grpc-gateway reverse proxy)
+	gwMux := runtime.NewServeMux()
+	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	if err := itemv1.RegisterItemServiceHandlerFromEndpoint(ctx, gwMux, grpcAddr, opts); err != nil {
+		logger.Error("failed to register gateway", "error", err)
 		os.Exit(1)
 	}
+
+	httpAddr := fmt.Sprintf(":%s", cfg.HTTPPort)
+	httpServer := &http.Server{
+		Addr:    httpAddr,
+		Handler: gwMux,
+	}
+
+	// Start HTTP server in background
+	go func() {
+		logger.Info("HTTP gateway listening", "address", httpAddr)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("HTTP gateway failed", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	// Graceful shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+	logger.Info("shutting down servers...")
+
+	grpcServer.GracefulStop()
+	if err := httpServer.Shutdown(context.Background()); err != nil {
+		logger.Error("HTTP gateway shutdown error", "error", err)
+	}
+	cancel()
 }
 
 // recoveryInterceptor returns a gRPC unary interceptor that recovers from panics.

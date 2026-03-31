@@ -1,6 +1,9 @@
 package postgres
 
-import "github.com/sample-go/item-service/internal/core/domain"
+import (
+	"github.com/sample-go/item-service/internal/config"
+	"github.com/sample-go/item-service/internal/core/domain"
+)
 
 // toDomainModel converts an ItemDataModel to an ItemDomainModel.
 func toDomainModel(data ItemDataModel) domain.ItemDomainModel {
@@ -12,10 +15,11 @@ func toDomainModel(data ItemDataModel) domain.ItemDomainModel {
 }
 
 // toDataModel converts an ItemDomainModel to an ItemDataModel.
-func toDataModel(dm domain.ItemDomainModel) ItemDataModel {
+func toDataModel(dm domain.ItemDomainModel, baseModel config.BaseModel) ItemDataModel {
 	return ItemDataModel{
 		ID:          dm.ID,
 		Name:        dm.Name,
 		Description: dm.Description,
+		BaseModel:   baseModel,
 	}
 }

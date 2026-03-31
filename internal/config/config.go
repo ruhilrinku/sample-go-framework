@@ -10,6 +10,7 @@ import (
 // Config holds application configuration.
 type Config struct {
 	GRPCPort           string
+	HTTPPort           string
 	DatabaseURL        string
 	DatabaseReaderURL  string
 	DatabaseWriterURL  string
@@ -41,6 +42,11 @@ func Load() (*Config, error) {
 		grpcPort = "50051"
 	}
 
+	httpPort := envOrProp("HTTP_PORT", "http_port", props)
+	if httpPort == "" {
+		httpPort = "8080"
+	}
+
 	lbChangelog := envOrProp("LIQUIBASE_CHANGELOG", "liquibase_changelog", props)
 	if lbChangelog == "" {
 		lbChangelog = "db/changelog-master.yaml"
@@ -48,6 +54,7 @@ func Load() (*Config, error) {
 
 	return &Config{
 		GRPCPort:           grpcPort,
+		HTTPPort:           httpPort,
 		DatabaseURL:        dbURL,
 		DatabaseReaderURL:  dbReaderURL,
 		DatabaseWriterURL:  dbWriterURL,

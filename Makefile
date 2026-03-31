@@ -2,6 +2,7 @@
 
 generate:
 	go run github.com/bufbuild/buf/cmd/buf@v1.50.0 generate
+	rm -rf gen/pb/google
 
 build:
 	go build ./...

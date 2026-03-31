@@ -7,6 +7,7 @@
 package itemv1
 
 import (
+	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -285,7 +286,7 @@ var File_item_v1_item_proto protoreflect.FileDescriptor
 
 const file_item_v1_item_proto_rawDesc = "" +
 	"\n" +
-	"\x12item/v1/item.proto\x12\aitem.v1\"I\n" +
+	"\x12item/v1/item.proto\x12\aitem.v1\x1a\x1cgoogle/api/annotations.proto\"I\n" +
 	"\x11CreateItemRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\"7\n" +
@@ -301,11 +302,11 @@ const file_item_v1_item_proto_rawDesc = "" +
 	"\x04Item\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
-	"\vdescription\x18\x03 \x01(\tR\vdescription2\x98\x01\n" +
-	"\vItemService\x12B\n" +
-	"\tListItems\x12\x19.item.v1.ListItemsRequest\x1a\x1a.item.v1.ListItemsResponse\x12E\n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription2\xc9\x01\n" +
+	"\vItemService\x12Y\n" +
+	"\tListItems\x12\x19.item.v1.ListItemsRequest\x1a\x1a.item.v1.ListItemsResponse\"\x15\x82\xd3\xe4\x93\x02\x0f\x12\r/api/v1/items\x12_\n" +
 	"\n" +
-	"CreateItem\x12\x1a.item.v1.CreateItemRequest\x1a\x1b.item.v1.CreateItemResponseB\x8e\x01\n" +
+	"CreateItem\x12\x1a.item.v1.CreateItemRequest\x1a\x1b.item.v1.CreateItemResponse\"\x18\x82\xd3\xe4\x93\x02\x12:\x01*\"\r/api/v1/itemsB\x8e\x01\n" +
 	"\vcom.item.v1B\tItemProtoP\x01Z7github.com/sample-go/item-service/gen/pb/item/v1;itemv1\xa2\x02\x03IXX\xaa\x02\aItem.V1\xca\x02\aItem\\V1\xe2\x02\x13Item\\V1\\GPBMetadata\xea\x02\bItem::V1b\x06proto3"
 
 var (
