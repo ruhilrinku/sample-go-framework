@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch Server",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/server/main.go",
+      "cwd": "${workspaceFolder}",
+      "env": {},
+      "args": [],
+      "showLog": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Debug Tests",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${workspaceFolder}/internal/core/service/",
+      "args": ["-v"]
+    }
+  ]
+}
