@@ -15,6 +15,7 @@ A Go gRPC microservice built with **hexagonal (ports & adapters) architecture**,
 | ID Generation        | UUID v7 (`github.com/google/uuid`)              |
 | Migrations           | Pure Go Liquibase-compatible runner (YAML changelogs) |
 | Logging              | `log/slog` (structured JSON)                    |
+| BDD Testing          | Cucumber/Godog (`github.com/cucumber/godog`)    |
 | Protobuf Generation  | Buf CLI (local plugins)                         |
 
 ## Architecture
@@ -60,6 +61,7 @@ Key design decisions:
 │   │   └── service/                    # Application service (business logic)
 │   └── adapter/
 │       ├── driving/grpc/               # gRPC server adapter (primary)
+│       │   └── features/               # Cucumber/Gherkin feature files
 │       └── driven/
 │           ├── postgres/               # PostgreSQL repository, data model, converter
 │           └── liquibase/              # Pure Go migration runner
@@ -221,10 +223,24 @@ A **panic recovery interceptor** catches unhandled panics and returns `INTERNAL`
 make test
 ```
 
-The project includes unit tests with mocked dependencies:
+The project includes unit tests and BDD (Cucumber) narrow integration tests with mocked dependencies:
+
+### Unit Tests
 
 - **Service layer tests** (`internal/core/service/item_service_test.go`) — 7 tests covering ListItems (success, error, page defaults, page cap) and CreateItem (success, empty name validation, repository error)
 - **gRPC adapter tests** (`internal/adapter/driving/grpc/item_server_test.go`) — 8 tests covering ListItems (success, error, empty result, not found) and CreateItem (success, empty name, service error, validation error)
+
+### Cucumber / BDD Tests (Narrow Integration)
+
+Gherkin feature files under `internal/adapter/driving/grpc/features/` define behavior scenarios executed via [godog](https://github.com/cucumber/godog). These test the gRPC adapter layer with a mocked service port — verifying request/response mapping and error code translation without a database or network.
+
+- **CreateItem scenarios** (`features/create_item.feature`) — 4 scenarios: success, empty name validation, internal error, validation error
+- **ListItems scenarios** (`features/list_items.feature`) — 4 scenarios: success with data table, empty result, internal error, not found error
+
+Run only the cucumber tests:
+```bash
+go test ./internal/adapter/driving/grpc/... -run TestFeatures -v
+```
 
 ## Debugging
 
