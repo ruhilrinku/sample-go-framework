@@ -1,12 +1,16 @@
 package session
 
-import "context"
+import (
+	"context"
+
+	"github.com/google/uuid"
+)
 
 // RequestSession holds per-request identity and context extracted from gRPC metadata headers.
 // Extend this struct to include additional claims (e.g. roles, email) when JWT parsing is added.
 type RequestSession struct {
-	TenantID string
-	UserID   string
+	TenantID uuid.UUID
+	UserID   uuid.UUID
 }
 
 type contextKey struct{}

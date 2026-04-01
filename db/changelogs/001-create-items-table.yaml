@@ -13,6 +13,11 @@ databaseChangeLog:
                     primaryKey: true
                     nullable: false
               - column:
+                  name: tenant_id
+                  type: UUID
+                  constraints:
+                    nullable: false
+              - column:
                   name: name
                   type: VARCHAR(255)
                   constraints:
@@ -35,12 +40,12 @@ databaseChangeLog:
                     nullable: true
               - column:
                   name: created_by
-                  type: VARCHAR(255)
+                  type: UUID
                   constraints:
                     nullable: false
               - column:
                   name: modified_by
-                  type: VARCHAR(255)
+                  type: UUID
                   constraints:
                     nullable: true
               - column:
@@ -54,6 +59,12 @@ databaseChangeLog:
       id: 001-create-items-index
       author: item-service
       changes:
+        - createIndex:
+            indexName: idx_items_tenant_id
+            tableName: items
+            columns:
+              - column:
+                  name: tenant_id
         - createIndex:
             indexName: idx_items_created_at
             tableName: items

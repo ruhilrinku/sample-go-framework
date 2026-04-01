@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -31,17 +32,22 @@ func invokeInterceptor(md metadata.MD) (*session.RequestSession, error) {
 	return resp.(*session.RequestSession), nil
 }
 
+var (
+	testTenantID = uuid.MustParse("10000000-0000-0000-0000-000000000001")
+	testUserID   = uuid.MustParse("20000000-0000-0000-0000-000000000002")
+)
+
 func TestUnaryInterceptor_Success(t *testing.T) {
-	md := metadata.Pairs("x-tenant-id", "tenant-abc", "x-user-id", "user-123")
+	md := metadata.Pairs("x-tenant-id", testTenantID.String(), "x-user-id", testUserID.String())
 	sess, err := invokeInterceptor(md)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if sess.TenantID != "tenant-abc" {
-		t.Errorf("TenantID = %q, want %q", sess.TenantID, "tenant-abc")
+	if sess.TenantID != testTenantID {
+		t.Errorf("TenantID = %q, want %q", sess.TenantID, testTenantID)
 	}
-	if sess.UserID != "user-123" {
-		t.Errorf("UserID = %q, want %q", sess.UserID, "user-123")
+	if sess.UserID != testUserID {
+		t.Errorf("UserID = %q, want %q", sess.UserID, testUserID)
 	}
 }
 
@@ -63,7 +69,7 @@ func TestUnaryInterceptor_MissingMetadata(t *testing.T) {
 }
 
 func TestUnaryInterceptor_MissingTenantID(t *testing.T) {
-	md := metadata.Pairs("x-user-id", "user-123")
+	md := metadata.Pairs("x-user-id", testUserID.String())
 	_, err := invokeInterceptor(md)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -75,7 +81,7 @@ func TestUnaryInterceptor_MissingTenantID(t *testing.T) {
 }
 
 func TestUnaryInterceptor_MissingUserID(t *testing.T) {
-	md := metadata.Pairs("x-tenant-id", "tenant-abc")
+	md := metadata.Pairs("x-tenant-id", testTenantID.String())
 	_, err := invokeInterceptor(md)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -98,6 +104,30 @@ func TestUnaryInterceptor_EmptyValues(t *testing.T) {
 	}
 }
 
+func TestUnaryInterceptor_InvalidTenantUUID(t *testing.T) {
+	md := metadata.Pairs("x-tenant-id", "not-a-uuid", "x-user-id", testUserID.String())
+	_, err := invokeInterceptor(md)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	st, _ := status.FromError(err)
+	if st.Code() != codes.InvalidArgument {
+		t.Errorf("code = %v, want %v", st.Code(), codes.InvalidArgument)
+	}
+}
+
+func TestUnaryInterceptor_InvalidUserUUID(t *testing.T) {
+	md := metadata.Pairs("x-tenant-id", testTenantID.String(), "x-user-id", "not-a-uuid")
+	_, err := invokeInterceptor(md)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	st, _ := status.FromError(err)
+	if st.Code() != codes.InvalidArgument {
+		t.Errorf("code = %v, want %v", st.Code(), codes.InvalidArgument)
+	}
+}
+
 func TestFromContext_NilWhenNoSession(t *testing.T) {
 	sess := session.FromContext(context.Background())
 	if sess != nil {
@@ -106,13 +136,13 @@ func TestFromContext_NilWhenNoSession(t *testing.T) {
 }
 
 func TestWithSession_RoundTrip(t *testing.T) {
-	s := &session.RequestSession{TenantID: "t1", UserID: "u1"}
+	s := &session.RequestSession{TenantID: testTenantID, UserID: testUserID}
 	ctx := session.WithSession(context.Background(), s)
 	got := session.FromContext(ctx)
 	if got == nil {
 		t.Fatal("expected session, got nil")
 	}
-	if got.TenantID != "t1" || got.UserID != "u1" {
-		t.Errorf("session = %+v, want TenantID=t1 UserID=u1", got)
+	if got.TenantID != testTenantID || got.UserID != testUserID {
+		t.Errorf("session = %+v, want TenantID=%s UserID=%s", got, testTenantID, testUserID)
 	}
 }

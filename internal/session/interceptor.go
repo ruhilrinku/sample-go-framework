@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -69,9 +70,21 @@ func UnaryInterceptor(logger *slog.Logger) grpc.UnaryServerInterceptor {
 			return nil, status.Error(codes.Unauthenticated, "x-tenant-id and x-user-id headers are required")
 		}
 
+		parsedTenantID, err := uuid.Parse(tenantID)
+		if err != nil {
+			logger.WarnContext(ctx, "invalid tenant ID format", "method", info.FullMethod, "x-tenant-id", tenantID)
+			return nil, status.Error(codes.InvalidArgument, "x-tenant-id must be a valid UUID")
+		}
+
+		parsedUserID, err := uuid.Parse(userID)
+		if err != nil {
+			logger.WarnContext(ctx, "invalid user ID format", "method", info.FullMethod, "x-user-id", userID)
+			return nil, status.Error(codes.InvalidArgument, "x-user-id must be a valid UUID")
+		}
+
 		sess := &RequestSession{
-			TenantID: tenantID,
-			UserID:   userID,
+			TenantID: parsedTenantID,
+			UserID:   parsedUserID,
 		}
 
 		logger.DebugContext(ctx, "request session initialised",
