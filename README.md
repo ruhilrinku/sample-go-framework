@@ -1,6 +1,6 @@
 # Item Service — gRPC Microservice (Hexagonal Architecture)
 
-A Go gRPC microservice built with **hexagonal (ports & adapters) architecture**, backed by **PostgreSQL** with **GORM**, **UUID v7** identifiers, structured logging, reader/writer database separation, **gRPC-JSON REST transcoding** via grpc-gateway, and a **request session interceptor** for per-request identity context.
+A Go gRPC microservice built with **hexagonal (ports & adapters) architecture**, backed by **PostgreSQL** with **GORM**, **UUID v7** identifiers, structured logging, reader/writer database separation, **gRPC-JSON REST transcoding** via grpc-gateway, a **request session interceptor** for per-request identity context, and **column-level multi-tenancy** with automatic tenant scoping.
 
 ## Tech Stack
 
@@ -44,7 +44,8 @@ Key design decisions:
 - **Reader/Writer DB separation** — Separate GORM connections for read (replica) and write (primary) operations
 - **Custom domain errors** — Typed errors (`Validation`, `NotFound`, `Internal`) mapped to gRPC status codes
 - **UUID v7** — Time-ordered UUIDs generated in the application layer via GORM `BeforeCreate` hook
-- **Request session interceptor** — Global gRPC interceptor extracts `x-tenant-id` and `x-user-id` from headers, initialises a `RequestSession` on the context, and propagates it to all downstream layers (works for both gRPC and REST transcoded calls)
+- **Request session interceptor** — Global gRPC interceptor extracts `x-tenant-id` and `x-user-id` from headers (validated as UUIDs), initialises a `RequestSession` on the context, and propagates it to all downstream layers (works for both gRPC and REST transcoded calls)
+- **Column-level multi-tenancy** — Every query is automatically scoped by `tenant_id` via a GORM scope function (`tenant.Scope(ctx)`), enforcing tenant isolation at the data layer
 
 ## Project Structure
 
@@ -66,6 +67,7 @@ Key design decisions:
 │       │   └── features/               # Cucumber/Gherkin feature files
 │       └── driven/
 │           ├── postgres/               # PostgreSQL repository, data model, converter
+│           │   └── tenant/             # Tenant scoping (GORM scope & tenant ID setter)
 │           └── liquibase/              # Pure Go migration runner
 ├── db/
 │   ├── changelog-master.yaml           # Liquibase master changelog
@@ -136,26 +138,38 @@ Migrations run **automatically on server startup** via `pgx`. A `databasechangel
 | Column       | Type         | Description                    |
 |--------------|--------------|--------------------------------|
 | `id`         | UUID (PK)    | UUID v7, generated in app layer |
+| `tenant_id`  | UUID         | Tenant identifier (NOT NULL)   |
 | `name`       | VARCHAR(255) | Item name                      |
 | `description`| TEXT         | Item description               |
-| `created_at` | TIMESTAMP    | Auto-set on creation           |
-| `modified_at`| TIMESTAMP    | Set on modification (NULL on create) |
-| `created_by` | VARCHAR(255) | Audit field (default: "System")|
-| `modified_by`| VARCHAR(255) | Audit field (NULL on create)   |
+| `created_at` | TIMESTAMPTZ  | Auto-set on creation           |
+| `modified_at`| TIMESTAMPTZ  | Set on modification (NULL on create) |
+| `created_by` | UUID         | User ID from session context   |
+| `modified_by`| UUID         | User ID on modification (NULL on create) |
 | `is_deleted` | BOOLEAN      | Soft delete flag               |
+
+Indexes: `idx_items_tenant_id` (tenant_id), `idx_items_created_at` (created_at)
 
 ## Request Session
 
 All API calls (gRPC and REST) require the following headers:
 
-| Header         | Description                          | Required |
-|----------------|--------------------------------------|----------|
-| `x-tenant-id`  | Tenant identifier for multi-tenancy | Yes      |
-| `x-user-id`    | User identifier for audit trails    | Yes      |
+| Header         | Type | Description                          | Required |
+|----------------|------|--------------------------------------|----------|
+| `x-tenant-id`  | UUID | Tenant identifier for multi-tenancy | Yes      |
+| `x-user-id`    | UUID | User identifier for audit trails    | Yes      |
 
-Missing or empty headers return `UNAUTHENTICATED`. The session is stored on the Go context and accessible via `session.FromContext(ctx)` anywhere downstream.
+Missing or empty headers return `UNAUTHENTICATED`. Malformed (non-UUID) values return `INVALID_ARGUMENT`. Both `TenantID` and `UserID` are stored as `uuid.UUID` on the `RequestSession`, accessible via `session.FromContext(ctx)` anywhere downstream.
 
-The `created_by` audit field on new items is automatically populated from the session's `UserID` (falls back to "System" if no session is present).
+The `created_by` audit field on new items is automatically populated from the session's `UserID` UUID.
+
+### Multi-Tenancy
+
+Tenant isolation is enforced at the data layer via automatic GORM scoping:
+
+- **Reads** — `tenant.Scope(ctx)` appends `WHERE tenant_id = ?` to every query
+- **Writes** — `tenant.SetTenantID(ctx)` extracts the tenant UUID from the session and populates the `BaseModel.TenantID` field before insert
+
+All repository operations include tenant scoping. No data from other tenants is ever visible.
 
 This interceptor is designed for easy extension — add JWT token parsing and additional `RequestSession` fields as needed.
 
@@ -181,8 +195,8 @@ Creates a new item. The ID (UUID v7) and metadata fields are generated server-si
 ```bash
 curl -X POST http://localhost:8080/api/v1/items \
   -H "Content-Type: application/json" \
-  -H "x-tenant-id: tenant-abc" \
-  -H "x-user-id: user-123" \
+  -H "x-tenant-id: 10000000-0000-0000-0000-000000000001" \
+  -H "x-user-id: 20000000-0000-0000-0000-000000000002" \
   -d '{"name": "Widget", "description": "A sample widget"}'
 ```
 
@@ -207,7 +221,8 @@ Retrieves a paginated list of items.
 
 **REST example:**
 ```bash
-curl -H "x-tenant-id: tenant-abc" -H "x-user-id: user-123" \
+curl -H "x-tenant-id: 10000000-0000-0000-0000-000000000001" \
+  -H "x-user-id: 20000000-0000-0000-0000-000000000002" \
   http://localhost:8080/api/v1/items?page=1&page_size=10
 ```
 
@@ -249,7 +264,8 @@ The project includes unit tests and BDD (Cucumber) narrow integration tests with
 
 - **Service layer tests** (`internal/core/service/item_service_test.go`) — 7 tests covering ListItems (success, error, page defaults, page cap) and CreateItem (success, empty name validation, repository error)
 - **gRPC adapter tests** (`internal/adapter/driving/grpc/item_server_test.go`) — 8 tests covering ListItems (success, error, empty result, not found) and CreateItem (success, empty name, service error, validation error)
-- **Session interceptor tests** (`internal/session/interceptor_test.go`) — 7 tests covering success, missing metadata, missing tenant, missing user, empty values, nil context, round-trip
+- **Session interceptor tests** (`internal/session/interceptor_test.go`) — 9 tests covering success, missing metadata, missing tenant, missing user, empty values, invalid tenant UUID, invalid user UUID, nil context, round-trip
+- **Tenant scope tests** (`internal/adapter/driven/postgres/tenant/scope_test.go`) — 4 tests covering SetTenantID success, no session, empty tenant ID, and Scope with no session
 
 ### Cucumber / BDD Tests (Narrow Integration)
 
