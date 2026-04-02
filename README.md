@@ -1,6 +1,6 @@
 # Item Service — gRPC Microservice (Hexagonal Architecture)
 
-A Go gRPC microservice built with **hexagonal (ports & adapters) architecture**, backed by **PostgreSQL** with **GORM**, **UUID v7** identifiers, structured logging, reader/writer database separation, **gRPC-JSON REST transcoding** via grpc-gateway, a **request session interceptor** for per-request identity context, and **column-level multi-tenancy** with automatic tenant scoping.
+A Go gRPC microservice built with **hexagonal (ports & adapters) architecture**, backed by **PostgreSQL** with **GORM**, **UUID v7** identifiers, structured logging, reader/writer database separation, **gRPC-JSON REST transcoding** via grpc-gateway, **FDS IAM JWT authentication**, **distributed trace propagation**, and **column-level multi-tenancy** with automatic tenant scoping.
 
 ## Tech Stack
 
@@ -44,7 +44,8 @@ Key design decisions:
 - **Reader/Writer DB separation** — Separate GORM connections for read (replica) and write (primary) operations
 - **Custom domain errors** — Typed errors (`Validation`, `NotFound`, `Internal`) mapped to gRPC status codes
 - **UUID v7** — Time-ordered UUIDs generated in the application layer via GORM `BeforeCreate` hook
-- **Request session interceptor** — Global gRPC interceptor extracts `x-tenant-id` and `x-user-id` from headers (validated as UUIDs), initialises a `RequestSession` on the context, and propagates it to all downstream layers (works for both gRPC and REST transcoded calls)
+- **FDS IAM JWT interceptor** — Global gRPC interceptor authenticates via `Authorization: Bearer <token>` (FDS-issued or standard JWT), falls back to explicit `x-tenant-id` / `x-user-id` headers, populates a typed `RequestSession` on the context, and propagates to all downstream layers for both gRPC and REST calls
+- **Distributed trace propagation** — Trace headers (`x-b3-traceid`, `x-b3-spanid`, `x-request-id`, `x-correlation-id`, etc.) are extracted into `RequestSession.Traces` on every request
 - **Column-level multi-tenancy** — Every query is automatically scoped by `tenant_id` via a GORM scope function (`tenant.Scope(ctx)`), enforcing tenant isolation at the data layer
 
 ## Project Structure
@@ -97,6 +98,7 @@ Configuration is loaded from `app.properties` with environment variable override
 | `grpc_port`            | `50051`                                              | gRPC server port                 |
 | `http_port`            | `8080`                                               | HTTP REST gateway port           |
 | `liquibase_changelog`  | `db/changelog-master.yaml`                           | Path to migration changelog      |
+| `fds_issuer`           | *(empty)*                                            | JWT `iss` claim value for FDS-issued tokens; enables FDS identity resolution when set |
 
 ## Getting Started
 
@@ -151,14 +153,75 @@ Indexes: `idx_items_tenant_id` (tenant_id), `idx_items_created_at` (created_at)
 
 ## Request Session
 
-All API calls (gRPC and REST) require the following headers:
+Every inbound call (gRPC or REST) passes through the `session.UnaryInterceptor`. It builds a `RequestSession` and stores it on the Go context — accessible anywhere via `session.FromContext(ctx)`.
 
-| Header         | Type | Description                          | Required |
-|----------------|------|--------------------------------------|----------|
-| `x-tenant-id`  | UUID | Tenant identifier for multi-tenancy | Yes      |
-| `x-user-id`    | UUID | User identifier for audit trails    | Yes      |
+### Authentication modes
 
-Missing or empty headers return `UNAUTHENTICATED`. Malformed (non-UUID) values return `INVALID_ARGUMENT`. Both `TenantID` and `UserID` are stored as `uuid.UUID` on the `RequestSession`, accessible via `session.FromContext(ctx)` anywhere downstream.
+The interceptor supports two authentication modes, checked in order:
+
+**1. JWT Bearer token** (`Authorization: Bearer <token>`)
+
+The JWT payload is base64url-decoded and identity claims are mapped to the session. The `iss` claim is compared against `fds_issuer`:
+
+| Claim | Session field | Notes |
+|---|---|---|
+| `tenant_id` | `TenantID` (uuid.UUID) | Required, must be a valid UUID |
+| `user_id` | `UserID` (uuid.UUID) | Required, must be a valid UUID |
+| `email` | `Email` | Optional |
+| `culture_code` | `CultureCode` | Optional |
+| `iss` == `fds_issuer` | `FDSClaims` | Populated only for FDS-issued tokens (see below) |
+
+> **JWT signature verification** is not performed in-process. Add JWKS-based signature validation against the issuer's public keys before deploying to production.
+
+**2. Explicit identity headers** (fallback when no Bearer token is present)
+
+| Header | Type | Required |
+|---|---|---|
+| `x-tenant-id` | UUID | Yes |
+| `x-user-id` | UUID | Yes |
+
+Missing or empty values → `UNAUTHENTICATED`. Malformed (non-UUID) values → `INVALID_ARGUMENT`.
+
+### FDS IAM tokens
+
+When `fds_issuer` is configured and an incoming JWT's `iss` claim matches, the interceptor treats it as a **Federated Data System (FDS)** token. The raw FDS-native identifiers are captured in `RequestSession.FDSClaims` for downstream platform identity resolution:
+
+```go
+type FDSClaims struct {
+    TenantID  string // fds_tenant_id JWT claim
+    UserID    string // fds_user_id JWT claim
+    UserEmail string // email JWT claim
+}
+```
+
+Downstream handlers that need to resolve FDS identifiers to platform UUIDs should check `sess.FDSClaims != nil` and call the appropriate identity resolution service.
+
+### Distributed tracing
+
+Trace headers are extracted from every request into `RequestSession.Traces` regardless of authentication mode:
+
+| Header | Field |
+|---|---|
+| `x-b3-traceid` | `Traces.TraceID` |
+| `x-b3-spanid` | `Traces.SpanID` |
+| `x-b3-parentspanid` | `Traces.ParentSpanID` |
+| `x-request-id` | `Traces.RequestID` |
+| `x-correlation-id` | `Traces.CorrelationID` |
+
+All these headers are also forwarded from the REST gateway into gRPC metadata without the `grpcgateway-` prefix via `session.GatewayHeaderMatcher`.
+
+### RequestSession reference
+
+```go
+type RequestSession struct {
+    TenantID    uuid.UUID  // populated from JWT claim or x-tenant-id header
+    UserID      uuid.UUID  // populated from JWT claim or x-user-id header
+    Email       string     // populated from JWT email claim
+    CultureCode string     // populated from JWT culture_code claim
+    Traces      Traces     // distributed trace identifiers
+    FDSClaims   *FDSClaims // non-nil only when JWT iss == fds_issuer
+}
+```
 
 The `created_by` audit field on new items is automatically populated from the session's `UserID` UUID.
 
@@ -170,8 +233,6 @@ Tenant isolation is enforced at the data layer via automatic GORM scoping:
 - **Writes** — `tenant.SetTenantID(ctx)` extracts the tenant UUID from the session and populates the `BaseModel.TenantID` field before insert
 
 All repository operations include tenant scoping. No data from other tenants is ever visible.
-
-This interceptor is designed for easy extension — add JWT token parsing and additional `RequestSession` fields as needed.
 
 ## API
 
@@ -191,13 +252,22 @@ Creates a new item. The ID (UUID v7) and metadata fields are generated server-si
 | name        | string | Item name (required) |
 | description | string | Item description     |
 
-**REST example:**
+**REST example (explicit headers):**
 ```bash
 curl -X POST http://localhost:8080/api/v1/items \
   -H "Content-Type: application/json" \
   -H "x-tenant-id: 10000000-0000-0000-0000-000000000001" \
   -H "x-user-id: 20000000-0000-0000-0000-000000000002" \
   -d '{"name": "Widget", "description": "A sample widget"}'
+```
+
+**REST example (JWT Bearer):**
+```bash
+curl -X POST http://localhost:8080/api/v1/items \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your-jwt-token>" \
+  -d '{"name": "Widget", "description": "A sample widget"}'
+```
 ```
 
 **Response:**
@@ -223,7 +293,7 @@ Retrieves a paginated list of items.
 ```bash
 curl -H "x-tenant-id: 10000000-0000-0000-0000-000000000001" \
   -H "x-user-id: 20000000-0000-0000-0000-000000000002" \
-  http://localhost:8080/api/v1/items?page=1&page_size=10
+  "http://localhost:8080/api/v1/items?page=1&page_size=10"
 ```
 
 **Response:**
@@ -264,7 +334,11 @@ The project includes unit tests and BDD (Cucumber) narrow integration tests with
 
 - **Service layer tests** (`internal/core/service/item_service_test.go`) — 7 tests covering ListItems (success, error, page defaults, page cap) and CreateItem (success, empty name validation, repository error)
 - **gRPC adapter tests** (`internal/adapter/driving/grpc/item_server_test.go`) — 8 tests covering ListItems (success, error, empty result, not found) and CreateItem (success, empty name, service error, validation error)
-- **Session interceptor tests** (`internal/session/interceptor_test.go`) — 9 tests covering success, missing metadata, missing tenant, missing user, empty values, invalid tenant UUID, invalid user UUID, nil context, round-trip
+- **Session interceptor tests** (`internal/session/interceptor_test.go`) — 15 tests across three groups:
+  - *Header auth:* success, missing metadata, missing tenant, missing user, empty values, invalid tenant UUID, invalid user UUID
+  - *JWT auth:* success, FDS issuer match populates `FDSClaims`, FDS issuer mismatch, malformed token, invalid UUID in claims
+  - *Traces:* headers populate all trace fields, absent headers yield empty traces
+  - *Context helpers:* nil when no session, round-trip
 - **Tenant scope tests** (`internal/adapter/driven/postgres/tenant/scope_test.go`) — 4 tests covering SetTenantID success, no session, empty tenant ID, and Scope with no session
 
 ### Cucumber / BDD Tests (Narrow Integration)

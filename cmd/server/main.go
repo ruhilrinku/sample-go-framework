@@ -90,7 +90,7 @@ func main() {
 	// gRPC server with session and recovery interceptors
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
-			session.UnaryInterceptor(logger),
+			session.UnaryInterceptor(logger, cfg.FDSIssuer),
 			recoveryInterceptor(logger),
 		),
 	)
