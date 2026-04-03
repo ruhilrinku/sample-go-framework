@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/sample-go/item-service/internal/fds/core/port"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -19,21 +20,21 @@ import (
 
 const (
 	// Identity headers (fallback when no Bearer token is present).
-	HeaderTenantID      = "x-tenant-id"
-	HeaderUserID        = "x-user-id"
+	HeaderTenantID      = "tenant_id"
+	HeaderUserID        = "user_id"
 	HeaderAuthorization = "authorization"
 
 	// JWT standard claim keys.
-	ClaimIssuer      = "iss"
 	ClaimTenantID    = "tenant_id"
 	ClaimUserID      = "user_id"
 	ClaimEmail       = "email"
 	ClaimCultureCode = "culture_code"
 
 	// FDS-specific JWT claim keys (present when iss == fdsIssuer).
-	FDSClaimTenantID  = "fds_tenant_id"
-	FDSClaimUserID    = "fds_user_id"
+	FDSClaimTenantID  = "sws.samauth.ten"
+	FDSClaimUserID    = "sws.samauth.ten.user"
 	FDSClaimUserEmail = "email"
+	FDSClaimIssuer    = "iss"
 
 	// Distributed tracing headers (B3 / OpenTelemetry).
 	HeaderTraceID       = "x-b3-traceid"
@@ -56,6 +57,18 @@ var sessionHeaders = map[string]bool{
 	HeaderCorrelationID: true,
 }
 
+type PlatformFDSIdentifierMapService struct {
+	svc    port.PlatformFdsIdentifierMapService
+	logger *slog.Logger
+}
+
+func NewPlatformFDSIdentifierMapService(svc port.PlatformFdsIdentifierMapService, logger *slog.Logger) *PlatformFDSIdentifierMapService {
+	return &PlatformFDSIdentifierMapService{
+		svc:    svc,
+		logger: logger,
+	}
+}
+
 // GatewayHeaderMatcher forwards session-related HTTP headers directly into
 // gRPC metadata without the "grpcgateway-" prefix. All other headers fall
 // through to the default matcher.
@@ -72,11 +85,11 @@ func GatewayHeaderMatcher(key string) (string, bool) {
 //     populates TenantID / UserID / Email / CultureCode, and detects FDS-issued tokens
 //     by comparing the "iss" claim against fdsIssuer — capturing raw FDS identifiers
 //     in RequestSession.FDSClaims for downstream platform identity resolution
-//   - Falls back to explicit x-tenant-id / x-user-id headers when no Bearer token is present
+//   - Falls back to explicit tenant_id / user_id headers when no Bearer token is present
 //
 // NOTE: JWT signature verification is intentionally omitted here. Add JWKS-based
 // signature validation against the issuer's public keys before deploying to production.
-func UnaryInterceptor(logger *slog.Logger, fdsIssuer string) grpc.UnaryServerInterceptor {
+func UnaryInterceptor(logger *slog.Logger, fdsIssuer string, platformFDSIdentifierMapService *PlatformFDSIdentifierMapService) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
 		req any,
@@ -98,7 +111,7 @@ func UnaryInterceptor(logger *slog.Logger, fdsIssuer string) grpc.UnaryServerInt
 		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
 			token := authHeader[7:] // trim "bearer " (7 chars, case-insensitive safe)
 			sess.JWT = token
-			if err := populateSessionFromJWT(sess, token, fdsIssuer, logger, info.FullMethod); err != nil {
+			if err := populateSessionFromJWT(ctx, sess, token, fdsIssuer, platformFDSIdentifierMapService, logger, info.FullMethod); err != nil {
 				logger.WarnContext(ctx, "JWT authentication failed",
 					"method", info.FullMethod, "error", err)
 				return nil, status.Error(codes.Unauthenticated, err.Error())
@@ -129,7 +142,7 @@ func UnaryInterceptor(logger *slog.Logger, fdsIssuer string) grpc.UnaryServerInt
 // All JWT payload entries are stored in sess.Claims as string values.
 // When the "iss" claim matches fdsIssuer the raw FDS identifiers are captured in
 // sess.FDSClaims for downstream FDS-to-platform identity resolution.
-func populateSessionFromJWT(sess *RequestSession, token, fdsIssuer string, logger *slog.Logger, method string) error {
+func populateSessionFromJWT(ctx context.Context, sess *RequestSession, token, fdsIssuer string, platformFDSIdentifierMapService *PlatformFDSIdentifierMapService, logger *slog.Logger, method string) error {
 	claims, err := decodeJWTPayload(token)
 	if err != nil {
 		return fmt.Errorf("invalid JWT: %w", err)
@@ -143,7 +156,7 @@ func populateSessionFromJWT(sess *RequestSession, token, fdsIssuer string, logge
 	sess.Claims = claimsStr
 
 	// Detect FDS-issued token and capture FDS-native identifiers.
-	if fdsIssuer != "" && stringClaim(claims, ClaimIssuer) == fdsIssuer {
+	if fdsIssuer != "" && stringClaim(claims, FDSClaimIssuer) == fdsIssuer {
 		sess.FDSClaims = &FDSClaims{
 			TenantID:  stringClaim(claims, FDSClaimTenantID),
 			UserID:    stringClaim(claims, FDSClaimUserID),
@@ -156,26 +169,28 @@ func populateSessionFromJWT(sess *RequestSession, token, fdsIssuer string, logge
 		)
 	}
 
-	tenantStr := stringClaim(claims, ClaimTenantID)
-	userStr := stringClaim(claims, ClaimUserID)
-
-	parsedTenantID, err := uuid.Parse(tenantStr)
+	// PlatformFdsIdentifierMapService is responsible for resolving the raw FDS identifiers in sess.FDSClaims to platform TenantID and UserID.
+	// For simplicity, this interceptor assumes that the FDS tenant_id and user_id claims are UUIDs and directly populates TenantID and UserID from them.
+	// Adjust this logic as needed to fit the actual format of FDS identifiers and the resolution mechanism in your platform.
+	platformTenantId, platformUserId, err := platformFDSIdentifierMapService.svc.GetPlatformDetailsbyFDSIdentifiers(ctx, sess.FDSClaims.TenantID, sess.FDSClaims.UserID)
 	if err != nil {
-		return fmt.Errorf("JWT claim %q is not a valid UUID", ClaimTenantID)
-	}
-	parsedUserID, err := uuid.Parse(userStr)
-	if err != nil {
-		return fmt.Errorf("JWT claim %q is not a valid UUID", ClaimUserID)
+		logger.ErrorContext(ctx, "failed to resolve platform identity from FDS identifiers",
+			"method", method,
+			"fdsTenantId", sess.FDSClaims.TenantID,
+			"fdsUserId", sess.FDSClaims.UserID,
+			"error", err,
+		)
+		return fmt.Errorf("failed to resolve platform identity from FDS identifiers: %w", err)
 	}
 
-	sess.TenantID = parsedTenantID
-	sess.UserID = parsedUserID
+	sess.TenantID = platformTenantId
+	sess.UserID = platformUserId
 	sess.Email = stringClaim(claims, ClaimEmail)
 	sess.CultureCode = stringClaim(claims, ClaimCultureCode)
 	return nil
 }
 
-// populateSessionFromHeaders falls back to explicit x-tenant-id / x-user-id metadata headers.
+// populateSessionFromHeaders falls back to explicit tenant_id / user_id metadata headers.
 // Sets sess.Claims with the two identity keys so downstream code can use Claims uniformly.
 func populateSessionFromHeaders(sess *RequestSession, md metadata.MD, logger *slog.Logger, method string) error {
 	tenantID := firstValue(md, HeaderTenantID)
@@ -184,19 +199,19 @@ func populateSessionFromHeaders(sess *RequestSession, md metadata.MD, logger *sl
 	if tenantID == "" || userID == "" {
 		logger.Warn("missing required session headers",
 			"method", method,
-			"x-tenant-id", tenantID,
-			"x-user-id", userID,
+			"tenant_id", tenantID,
+			"user_id", userID,
 		)
-		return status.Error(codes.Unauthenticated, "authorization token or x-tenant-id and x-user-id headers are required")
+		return status.Error(codes.Unauthenticated, "authorization token or tenant_id and user_id headers are required")
 	}
 
 	parsedTenantID, err := uuid.Parse(tenantID)
 	if err != nil {
-		return status.Error(codes.InvalidArgument, "x-tenant-id must be a valid UUID")
+		return status.Error(codes.InvalidArgument, "tenant_id must be a valid UUID")
 	}
 	parsedUserID, err := uuid.Parse(userID)
 	if err != nil {
-		return status.Error(codes.InvalidArgument, "x-user-id must be a valid UUID")
+		return status.Error(codes.InvalidArgument, "user_id must be a valid UUID")
 	}
 
 	sess.TenantID = parsedTenantID

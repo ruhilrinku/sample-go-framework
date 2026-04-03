@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/sample-go/item-service/internal/core/domain"
-	"github.com/sample-go/item-service/internal/core/service"
+	"github.com/sample-go/item-service/internal/items/core/domain"
+	"github.com/sample-go/item-service/internal/items/core/service"
 )
 
 // mockItemRepository is a test double for port.ItemRepository.

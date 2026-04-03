@@ -8,9 +8,9 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"github.com/sample-go/item-service/internal/adapter/driven/postgres/tenant"
 	"github.com/sample-go/item-service/internal/config"
-	"github.com/sample-go/item-service/internal/core/domain"
+	"github.com/sample-go/item-service/internal/config/postgres/tenant"
+	"github.com/sample-go/item-service/internal/items/core/domain"
 	"github.com/sample-go/item-service/internal/session"
 )
 
@@ -32,7 +32,11 @@ func (r *ItemRepository) ListItems(ctx context.Context, page, pageSize int) ([]d
 
 	r.logger.DebugContext(ctx, "counting items")
 	var total int64
-	if err := r.readerDB.WithContext(ctx).Model(&ItemDataModel{}).Scopes(tenant.Scope(ctx)).Where("is_deleted = ?", false).Count(&total).Error; err != nil {
+	if err := r.readerDB.WithContext(ctx).
+		Model(&ItemDataModel{}).
+		Scopes(tenant.Scope(ctx)).
+		Where("is_deleted = ?", false).
+		Count(&total).Error; err != nil {
 		r.logger.ErrorContext(ctx, "failed to count items", "error", err)
 		return nil, 0, domain.NewInternalError("counting items", err)
 	}

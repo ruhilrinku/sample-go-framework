@@ -2,7 +2,7 @@ package postgres
 
 import (
 	"github.com/sample-go/item-service/internal/config"
-	"github.com/sample-go/item-service/internal/core/domain"
+	"github.com/sample-go/item-service/internal/items/core/domain"
 )
 
 // toDomainModel converts an ItemDataModel to an ItemDomainModel.

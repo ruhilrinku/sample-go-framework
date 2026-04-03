@@ -53,7 +53,7 @@ func makeTestJWT(claims map[string]any) string {
 // ─── Header-based authentication ────────────────────────────────────────────
 
 func TestUnaryInterceptor_Success_Headers(t *testing.T) {
-	md := metadata.Pairs("x-tenant-id", testTenantID.String(), "x-user-id", testUserID.String())
+	md := metadata.Pairs("tenant_id", testTenantID.String(), "user_id", testUserID.String())
 	sess, err := invokeInterceptor(md, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -83,7 +83,7 @@ func TestUnaryInterceptor_MissingMetadata(t *testing.T) {
 }
 
 func TestUnaryInterceptor_MissingTenantID(t *testing.T) {
-	md := metadata.Pairs("x-user-id", testUserID.String())
+	md := metadata.Pairs("user_id", testUserID.String())
 	_, err := invokeInterceptor(md, "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -95,7 +95,7 @@ func TestUnaryInterceptor_MissingTenantID(t *testing.T) {
 }
 
 func TestUnaryInterceptor_MissingUserID(t *testing.T) {
-	md := metadata.Pairs("x-tenant-id", testTenantID.String())
+	md := metadata.Pairs("tenant_id", testTenantID.String())
 	_, err := invokeInterceptor(md, "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -107,7 +107,7 @@ func TestUnaryInterceptor_MissingUserID(t *testing.T) {
 }
 
 func TestUnaryInterceptor_EmptyValues(t *testing.T) {
-	md := metadata.Pairs("x-tenant-id", "", "x-user-id", "")
+	md := metadata.Pairs("tenant_id", "", "user_id", "")
 	_, err := invokeInterceptor(md, "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -119,7 +119,7 @@ func TestUnaryInterceptor_EmptyValues(t *testing.T) {
 }
 
 func TestUnaryInterceptor_InvalidTenantUUID(t *testing.T) {
-	md := metadata.Pairs("x-tenant-id", "not-a-uuid", "x-user-id", testUserID.String())
+	md := metadata.Pairs("tenant_id", "not-a-uuid", "user_id", testUserID.String())
 	_, err := invokeInterceptor(md, "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -131,7 +131,7 @@ func TestUnaryInterceptor_InvalidTenantUUID(t *testing.T) {
 }
 
 func TestUnaryInterceptor_InvalidUserUUID(t *testing.T) {
-	md := metadata.Pairs("x-tenant-id", testTenantID.String(), "x-user-id", "not-a-uuid")
+	md := metadata.Pairs("tenant_id", testTenantID.String(), "user_id", "not-a-uuid")
 	_, err := invokeInterceptor(md, "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -171,12 +171,12 @@ func TestUnaryInterceptor_JWT_Success(t *testing.T) {
 
 func TestUnaryInterceptor_JWT_FDSIssuer_PopulatesFDSClaims(t *testing.T) {
 	token := makeTestJWT(map[string]any{
-		"iss":           testFDSIssuer,
-		"tenant_id":     testTenantID.String(),
-		"user_id":       testUserID.String(),
-		"fds_tenant_id": "fds-tenant-001",
-		"fds_user_id":   "fds-user-001",
-		"email":         "fdsuser@fds.example.com",
+		"iss":                  testFDSIssuer,
+		"tenant_id":            testTenantID.String(),
+		"user_id":              testUserID.String(),
+		"sws.samauth.ten":      "fds-tenant-001",
+		"sws.samauth.ten.user": "fds-user-001",
+		"email":                "fdsuser@fds.example.com",
 	})
 	md := metadata.Pairs("authorization", "Bearer "+token)
 	sess, err := invokeInterceptor(md, testFDSIssuer)
@@ -245,8 +245,8 @@ func TestUnaryInterceptor_JWT_InvalidTenantUUIDInClaims(t *testing.T) {
 
 func TestUnaryInterceptor_Traces_PopulatedFromHeaders(t *testing.T) {
 	md := metadata.Pairs(
-		"x-tenant-id", testTenantID.String(),
-		"x-user-id", testUserID.String(),
+		"tenant_id", testTenantID.String(),
+		"user_id", testUserID.String(),
 		"x-b3-traceid", "abc123traceid",
 		"x-b3-spanid", "span456",
 		"x-b3-parentspanid", "parent789",
@@ -275,7 +275,7 @@ func TestUnaryInterceptor_Traces_PopulatedFromHeaders(t *testing.T) {
 }
 
 func TestUnaryInterceptor_Traces_EmptyWhenAbsent(t *testing.T) {
-	md := metadata.Pairs("x-tenant-id", testTenantID.String(), "x-user-id", testUserID.String())
+	md := metadata.Pairs("tenant_id", testTenantID.String(), "user_id", testUserID.String())
 	sess, err := invokeInterceptor(md, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -309,7 +309,7 @@ func TestWithSession_RoundTrip(t *testing.T) {
 // ─── Claims map ───────────────────────────────────────────────────────────────
 
 func TestUnaryInterceptor_Headers_PopulatesClaimsMap(t *testing.T) {
-	md := metadata.Pairs("x-tenant-id", testTenantID.String(), "x-user-id", testUserID.String())
+	md := metadata.Pairs("tenant_id", testTenantID.String(), "user_id", testUserID.String())
 	sess, err := invokeInterceptor(md, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -367,7 +367,7 @@ func TestUnaryInterceptor_JWT_StoresRawToken(t *testing.T) {
 }
 
 func TestUnaryInterceptor_Headers_NoJWTStored(t *testing.T) {
-	md := metadata.Pairs("x-tenant-id", testTenantID.String(), "x-user-id", testUserID.String())
+	md := metadata.Pairs("tenant_id", testTenantID.String(), "user_id", testUserID.String())
 	sess, err := invokeInterceptor(md, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -380,7 +380,7 @@ func TestUnaryInterceptor_Headers_NoJWTStored(t *testing.T) {
 // ─── Timestamp ────────────────────────────────────────────────────────────────
 
 func TestUnaryInterceptor_TimestampSet(t *testing.T) {
-	md := metadata.Pairs("x-tenant-id", testTenantID.String(), "x-user-id", testUserID.String())
+	md := metadata.Pairs("tenant_id", testTenantID.String(), "user_id", testUserID.String())
 	sess, err := invokeInterceptor(md, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

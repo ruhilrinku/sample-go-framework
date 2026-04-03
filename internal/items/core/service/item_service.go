@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/sample-go/item-service/internal/core/domain"
-	"github.com/sample-go/item-service/internal/core/port"
+	"github.com/sample-go/item-service/internal/items/core/domain"
+	"github.com/sample-go/item-service/internal/items/core/port"
 )
 
 // ItemService implements the primary port using injected secondary ports.

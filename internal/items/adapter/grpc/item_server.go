@@ -8,8 +8,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	itemv1 "github.com/sample-go/item-service/gen/pb/item/v1"
-	"github.com/sample-go/item-service/internal/core/domain"
-	"github.com/sample-go/item-service/internal/core/port"
+	"github.com/sample-go/item-service/internal/items/core/domain"
+	"github.com/sample-go/item-service/internal/items/core/port"
 )
 
 // ItemServer implements the gRPC ItemServiceServer.

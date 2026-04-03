@@ -1,8 +1,8 @@
 package postgres
 
 import (
-	"github.com/google/uuid"
 	"github.com/sample-go/item-service/internal/config"
+	"github.com/sample-go/item-service/internal/config/postgres/common"
 	"gorm.io/gorm"
 )
 
@@ -22,7 +22,7 @@ func (ItemDataModel) TableName() string {
 // BeforeCreate generates a UUID v7 for the ID before inserting.
 func (m *ItemDataModel) BeforeCreate(tx *gorm.DB) error {
 	if m.ID == "" {
-		id, err := uuid.NewV7()
+		id, err := common.GenerateUUID()
 		if err != nil {
 			return err
 		}

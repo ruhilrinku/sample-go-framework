@@ -3,7 +3,7 @@ package port
 import (
 	"context"
 
-	"github.com/sample-go/item-service/internal/core/domain"
+	"github.com/sample-go/item-service/internal/items/core/domain"
 )
 
 // ItemRepository is the driven (secondary) port for persistence.

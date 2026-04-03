@@ -12,8 +12,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	itemv1 "github.com/sample-go/item-service/gen/pb/item/v1"
-	grpcadapter "github.com/sample-go/item-service/internal/adapter/driving/grpc"
-	"github.com/sample-go/item-service/internal/core/domain"
+	grpcadapter "github.com/sample-go/item-service/internal/items/adapter/grpc"
+	"github.com/sample-go/item-service/internal/items/core/domain"
 )
 
 // testContext holds state shared across step definitions within a scenario.

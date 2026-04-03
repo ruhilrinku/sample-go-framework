@@ -1,0 +1,43 @@
+databaseChangeLog:
+  - changeSet:
+      id: 002-create-platform-fds-identifier-mapping-table
+      author: item-service
+      changes:
+        - createTable:
+            tableName: platform_fds_identifier_mapping
+            columns:
+              - column:
+                  name: id
+                  type: UUID
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: fds_tenant_id
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: fds_user_id
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: platform_tenant_id
+                  type: UUID
+                  constraints:
+                    nullable: false
+              - column:
+                  name: platform_user_id
+                  type: UUID
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 002-create-platform-fds-identifier-mapping-unique-constraint
+      author: item-service
+      changes:
+        - addUniqueConstraint:
+            constraintName: uq_platform_fds_identifier_mapping_fds_tenant_user
+            tableName: platform_fds_identifier_mapping
+            columnNames: fds_tenant_id, fds_user_id

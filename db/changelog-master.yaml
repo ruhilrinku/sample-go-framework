@@ -2,3 +2,7 @@ databaseChangeLog:
   - include:
       file: changelogs/001-create-items-table.yaml
       relativeToChangelogFile: true
+      
+  - include:
+      file: changelogs/002-create-platform-fds-identifier-mapping-table.yaml
+      relativeToChangelogFile: true

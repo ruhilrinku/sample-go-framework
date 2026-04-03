@@ -22,11 +22,13 @@ import (
 	"gorm.io/gorm"
 
 	itemv1 "github.com/sample-go/item-service/gen/pb/item/v1"
-	lb "github.com/sample-go/item-service/internal/adapter/driven/liquibase"
-	"github.com/sample-go/item-service/internal/adapter/driven/postgres"
-	grpcadapter "github.com/sample-go/item-service/internal/adapter/driving/grpc"
 	"github.com/sample-go/item-service/internal/config"
-	"github.com/sample-go/item-service/internal/core/service"
+	lb "github.com/sample-go/item-service/internal/config/liquibase"
+	fdsPostgres "github.com/sample-go/item-service/internal/fds/adapter/postgres"
+	fdsService "github.com/sample-go/item-service/internal/fds/core/service"
+	grpcadapter "github.com/sample-go/item-service/internal/items/adapter/grpc"
+	"github.com/sample-go/item-service/internal/items/adapter/postgres"
+	"github.com/sample-go/item-service/internal/items/core/service"
 	"github.com/sample-go/item-service/internal/session"
 )
 
@@ -87,13 +89,18 @@ func main() {
 	itemSvc := service.New(itemRepo, logger)
 	itemServer := grpcadapter.NewItemServer(itemSvc, logger)
 
+	fdsRepo := fdsPostgres.NewPlatformFDSIdentifierMappingRepository(readerDB, writerDB, logger)
+	fdsSvc := fdsService.NewPlatformFDSIdentifierMapService(fdsRepo, logger)
+	sessionSvc := session.NewPlatformFDSIdentifierMapService(fdsSvc, logger)
+
 	// gRPC server with session and recovery interceptors
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
-			session.UnaryInterceptor(logger, cfg.FDSIssuer),
+			session.UnaryInterceptor(logger, cfg.FDSIssuer, sessionSvc),
 			recoveryInterceptor(logger),
 		),
 	)
+
 	itemv1.RegisterItemServiceServer(grpcServer, itemServer)
 	reflection.Register(grpcServer)
 

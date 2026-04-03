@@ -207,6 +207,9 @@ func changesToSQL(cs changeSetDef) string {
 		if ci, ok := change["createIndex"]; ok {
 			parts = append(parts, generateCreateIndex(ci))
 		}
+		if uc, ok := change["addUniqueConstraint"]; ok {
+			parts = append(parts, generateAddUniqueConstraint(uc))
+		}
 	}
 	return strings.Join(parts, "\n")
 }
@@ -278,6 +281,19 @@ func generateCreateIndex(v interface{}) string {
 
 	return fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (%s);",
 		indexName, tableName, strings.Join(colExprs, ", "))
+}
+
+func generateAddUniqueConstraint(v interface{}) string {
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	constraintName := str(m["constraintName"])
+	tableName := str(m["tableName"])
+	columnNames := str(m["columnNames"])
+
+	return fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s UNIQUE (%s);",
+		tableName, constraintName, columnNames)
 }
 
 func checksum(cs changeSetDef) string {
