@@ -21,9 +21,9 @@ import (
 	gormpostgres "gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	"github.com/sample-go/item-service/config"
+	lb "github.com/sample-go/item-service/config/liquibase"
 	itemv1 "github.com/sample-go/item-service/gen/pb/item/v1"
-	"github.com/sample-go/item-service/internal/config"
-	lb "github.com/sample-go/item-service/internal/config/liquibase"
 	fdsPostgres "github.com/sample-go/item-service/internal/fds/adapter/postgres"
 	fdsService "github.com/sample-go/item-service/internal/fds/core/service"
 	grpcadapter "github.com/sample-go/item-service/internal/items/adapter/grpc"

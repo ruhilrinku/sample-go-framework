@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"github.com/sample-go/item-service/internal/config"
-	"github.com/sample-go/item-service/internal/config/postgres/tenant"
+	"github.com/sample-go/item-service/config"
+	"github.com/sample-go/item-service/config/postgres/tenant"
 	"github.com/sample-go/item-service/internal/items/core/domain"
 	"github.com/sample-go/item-service/internal/session"
 )

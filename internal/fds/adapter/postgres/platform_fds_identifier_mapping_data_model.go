@@ -2,7 +2,7 @@ package postgres
 
 import (
 	"github.com/google/uuid"
-	"github.com/sample-go/item-service/internal/config/postgres/common"
+	"github.com/sample-go/item-service/config/postgres/common"
 	"gorm.io/gorm"
 )
 
