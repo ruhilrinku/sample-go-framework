@@ -52,27 +52,26 @@ Key design decisions:
 
 ```
 ├── cmd/server/                              # Application entry point (main.go)
+├── config/                                  # App config, BaseModel, shared infrastructure
+│   ├── config.go                            # Config struct (ports, DB URLs, FDSIssuer)
+│   ├── base_model.go                        # Shared GORM BaseModel (audit fields, tenant_id)
+│   ├── liquibase/                           # Pure Go Liquibase-compatible migration runner
+│   └── postgres/
+│       ├── common/                          # UUID v7 generation utility
+│       └── tenant/                          # Tenant scoping (GORM scope & tenant ID setter)
 ├── proto/
 │   ├── item/v1/                             # Protobuf service definitions (with HTTP annotations)
 │   └── google/api/                          # Vendored googleapis proto (annotations, http)
 ├── gen/pb/item/v1/                          # Generated Go protobuf/gRPC/gateway code
 ├── internal/
-│   ├── config/                              # App config, BaseModel, shared infrastructure
-│   │   ├── config.go                        # Config struct (ports, DB URLs, FDSIssuer)
-│   │   ├── base_model.go                    # Shared GORM BaseModel (audit fields, tenant_id)
-│   │   ├── liquibase/                       # Pure Go Liquibase-compatible migration runner
-│   │   └── postgres/
-│   │       ├── common/                      # UUID v7 generation utility
-│   │       └── tenant/                      # Tenant scoping (GORM scope & tenant ID setter)
 │   ├── session/                             # Request session, JWT interceptor & header matcher
 │   ├── items/                               # Items domain — hexagonal slice
 │   │   ├── core/
 │   │   │   ├── domain/                      # ItemDomainModel & typed error definitions
 │   │   │   ├── port/                        # ItemService & ItemRepository interfaces
-│   │   │   └── service/                     # Item business logic
+│   │   │   └── service/                     # Item business logic + unit tests
 │   │   └── adapter/
-│   │       ├── grpc/                        # gRPC server adapter (driving)
-│   │       │   └── features/               # Cucumber/Gherkin feature files
+│   │       ├── grpc/                        # gRPC server adapter (driving) + unit tests
 │   │       └── postgres/                    # PostgreSQL repository, data model, converter
 │   └── fds/                                 # FDS platform identity — hexagonal slice
 │       ├── core/
@@ -80,13 +79,18 @@ Key design decisions:
 │       │   └── service/                     # FDS-to-platform identity resolution service
 │       └── adapter/
 │           └── postgres/                    # FDS identifier mapping repository & data model
-├── db/
+├── test/                                    # Cucumber/BDD integration tests
+│   ├── item_server_cucumber_test.go         # Godog step definitions & test runner
+│   └── features/                            # Gherkin feature files
+│       ├── create_item.feature
+│       └── list_items.feature
+├── db-migrations/
 │   ├── changelog-master.yaml               # Liquibase master changelog
 │   └── changelogs/                          # Individual migration changesets
 ├── app.properties                           # Application configuration
 ├── buf.yaml                                 # Buf module config
 ├── buf.gen.yaml                             # Buf code generation config
-├── Makefile                                 # Build, test, generate commands
+├── Makefile                                 # Build, test, generate, db commands
 └── .vscode/launch.json                      # Debug configuration (Delve)
 ```
 
@@ -107,7 +111,7 @@ Configuration is loaded from `app.properties` with environment variable override
 | `database_writer_url`  | Falls back to `database_url`                         | Write primary connection (GORM)  |
 | `grpc_port`            | `50051`                                              | gRPC server port                 |
 | `http_port`            | `8080`                                               | HTTP REST gateway port           |
-| `liquibase_changelog`  | `db/changelog-master.yaml`                           | Path to migration changelog      |
+| `liquibase_changelog`  | `db-migrations/changelog-master.yaml`                | Path to migration changelog      |
 | `fds_issuer`           | *(empty)*                                            | JWT `iss` claim value for FDS-issued tokens; enables FDS platform identity resolution when set |
 
 ## Getting Started
@@ -132,17 +136,26 @@ Configuration is loaded from `app.properties` with environment variable override
 ```bash
 make generate   # Regenerate protobuf Go code (uses buf CLI)
 make build      # Build all packages
-make test       # Run unit tests with verbose output
+make test       # Run all tests (unit + BDD) with verbose output
 make clean      # Remove generated protobuf code
+```
+
+### Database commands (requires Liquibase CLI)
+
+```bash
+make db-update    # Apply pending changesets
+make db-rollback  # Roll back the last changeset
+make db-status    # Show applied/pending changeset status
+make db-validate  # Validate the changelog
 ```
 
 ## Database Migrations
 
-Migrations use a **pure Go Liquibase-compatible runner** — no external Liquibase installation needed. Changelogs are defined in YAML under `db/`:
+Migrations use a **pure Go Liquibase-compatible runner** — no external Liquibase installation needed. Changelogs are defined in YAML under `db-migrations/`:
 
-- `db/changelog-master.yaml` — Master changelog (includes individual changesets)
-- `db/changelogs/001-create-items-table.yaml` — Creates `items` table and indexes
-- `db/changelogs/002-create-platform-fds-identifier-mapping-table.yaml` — Creates `platform_fds_identifier_mapping` table, unique constraint, and indexes
+- `db-migrations/changelog-master.yaml` — Master changelog (includes individual changesets)
+- `db-migrations/changelogs/001-create-items-table.yaml` — Creates `items` table and indexes
+- `db-migrations/changelogs/002-create-platform-fds-identifier-mapping-table.yaml` — Creates `platform_fds_identifier_mapping` table, unique constraint, and indexes
 
 Migrations run **automatically on server startup** via `pgx`. A `databasechangelog` tracking table is created to manage applied changesets and checksums.
 
@@ -414,18 +427,18 @@ The project includes unit tests and BDD (Cucumber) narrow integration tests with
   - *GetLocale (5):* underscore format, hyphen format, blank, invalid, caching
   - *SetCustomClaim (3):* add new key, no-op on existing key, initialises nil map
   - *Context helpers (2):* nil when no session, round-trip
-- **Tenant scope** (`internal/config/postgres/tenant/scope_test.go`) — 4 tests covering `SetTenantID` (success, no session, empty tenant ID) and `Scope` (no session adds error)
+- **Tenant scope** (`config/postgres/tenant/scope_test.go`) — 4 tests covering `SetTenantID` (success, no session, empty tenant ID) and `Scope` (no session adds error)
 
 ### Cucumber / BDD Tests (Narrow Integration)
 
-Gherkin feature files under `internal/items/adapter/grpc/features/` define behavior scenarios executed via [godog](https://github.com/cucumber/godog). These test the gRPC adapter layer with a mocked service port — verifying request/response mapping and error code translation without a database or network.
+Gherkin feature files under `test/features/` define behavior scenarios executed via [godog](https://github.com/cucumber/godog). The step definitions and test runner live in `test/item_server_cucumber_test.go`. These tests exercise the gRPC adapter with a mocked service port — verifying request/response mapping and error code translation without a database or network.
 
-- **CreateItem scenarios** (`features/create_item.feature`) — 4 scenarios: success, empty name validation, internal error, validation error
-- **ListItems scenarios** (`features/list_items.feature`) — 4 scenarios: success with data table, empty result, internal error, not found error
+- **CreateItem scenarios** (`test/features/create_item.feature`) — 4 scenarios: success, empty name validation, internal error, validation error
+- **ListItems scenarios** (`test/features/list_items.feature`) — 4 scenarios: success with data table, empty result, internal error, not found error
 
 Run only the cucumber tests:
 ```bash
-go test ./internal/items/adapter/grpc/... -run TestFeatures -v
+go test ./test/... -run TestFeatures -v
 ```
 
 ## Debugging
