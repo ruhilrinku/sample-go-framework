@@ -23,13 +23,13 @@ import (
 
 	"github.com/sample-go/item-service/config"
 	lb "github.com/sample-go/item-service/config/liquibase"
+	"github.com/sample-go/item-service/config/session"
 	itemv1 "github.com/sample-go/item-service/gen/pb/item/v1"
 	fdsPostgres "github.com/sample-go/item-service/internal/fds/adapter/postgres"
 	fdsService "github.com/sample-go/item-service/internal/fds/core/service"
 	grpcadapter "github.com/sample-go/item-service/internal/items/adapter/grpc"
 	"github.com/sample-go/item-service/internal/items/adapter/postgres"
 	"github.com/sample-go/item-service/internal/items/core/service"
-	"github.com/sample-go/item-service/internal/session"
 )
 
 func main() {
@@ -91,12 +91,12 @@ func main() {
 
 	fdsRepo := fdsPostgres.NewPlatformFDSIdentifierMappingRepository(readerDB, writerDB, logger)
 	fdsSvc := fdsService.NewPlatformFDSIdentifierMapService(fdsRepo, logger)
-	sessionSvc := session.NewPlatformFDSIdentifierMapService(fdsSvc, logger)
+	_ = fdsSvc // available for injection into handlers that need FDS identity resolution
 
 	// gRPC server with session and recovery interceptors
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
-			session.UnaryInterceptor(logger, cfg.FDSIssuer, sessionSvc),
+			session.UnaryInterceptor(logger, cfg.FDSIssuer),
 			recoveryInterceptor(logger),
 		),
 	)

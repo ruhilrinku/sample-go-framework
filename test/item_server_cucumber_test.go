@@ -16,6 +16,23 @@ import (
 	"github.com/sample-go/item-service/internal/items/core/domain"
 )
 
+// mockItemService is a test double for port.ItemService.
+type mockItemService struct {
+	items       []domain.ItemDomainModel
+	total       int
+	err         error
+	createdItem domain.ItemDomainModel
+	createErr   error
+}
+
+func (m *mockItemService) ListItems(_ context.Context, _, _ int) ([]domain.ItemDomainModel, int, error) {
+	return m.items, m.total, m.err
+}
+
+func (m *mockItemService) CreateItem(_ context.Context, _, _ string) (domain.ItemDomainModel, error) {
+	return m.createdItem, m.createErr
+}
+
 // testContext holds state shared across step definitions within a scenario.
 type testContext struct {
 	mock           *mockItemService

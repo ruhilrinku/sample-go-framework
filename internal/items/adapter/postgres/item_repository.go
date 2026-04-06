@@ -11,7 +11,7 @@ import (
 	"github.com/sample-go/item-service/config"
 	"github.com/sample-go/item-service/config/postgres/tenant"
 	"github.com/sample-go/item-service/internal/items/core/domain"
-	"github.com/sample-go/item-service/internal/session"
+	"github.com/sample-go/item-service/config/session"
 )
 
 // ItemRepository is the PostgreSQL adapter implementing port.ItemRepository.

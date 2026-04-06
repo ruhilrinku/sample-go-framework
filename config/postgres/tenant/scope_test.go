@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/sample-go/item-service/internal/config/postgres/tenant"
-	"github.com/sample-go/item-service/internal/session"
+	"github.com/sample-go/item-service/config/postgres/tenant"
+	"github.com/sample-go/item-service/config/session"
 )
 
 var (

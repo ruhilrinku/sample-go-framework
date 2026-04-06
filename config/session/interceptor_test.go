@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/sample-go/item-service/internal/session"
+	"github.com/sample-go/item-service/config/session"
 )
 
 var (

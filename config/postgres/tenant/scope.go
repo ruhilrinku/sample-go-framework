@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"github.com/sample-go/item-service/internal/session"
+	"github.com/sample-go/item-service/config/session"
 )
 
 // Scope returns a GORM scope function that filters queries by the tenant ID
