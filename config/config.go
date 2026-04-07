@@ -16,6 +16,7 @@ type Config struct {
 	DatabaseWriterURL  string
 	LiquibaseChangelog string
 	FDSIssuer          string
+	FDSGRPCURL         string
 }
 
 // Load reads config from app.properties, then overrides with environment variables.
@@ -61,6 +62,7 @@ func Load() (*Config, error) {
 		DatabaseWriterURL:  dbWriterURL,
 		LiquibaseChangelog: lbChangelog,
 		FDSIssuer:          envOrProp("FDS_ISSUER", "fds_issuer", props),
+		FDSGRPCURL:         envOrProp("FDS_GRPC_URL", "fds_grpc_url", props),
 	}, nil
 }
 

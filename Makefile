@@ -14,7 +14,7 @@ clean:
 	rm -rf gen/pb/
 
 run:
-	go run ./cmd/server/
+	go run ./cmd/server/main.go
 
 db-update:
 	liquibase --defaults-file=liquibase.properties update

@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package fds.v1;
+
+option go_package = "github.com/sample-go/item-service/gen/pb/fds/v1;fdsv1";
+
+service FdsService {
+  rpc GetPlatformIdentifiers (FdsIdentifiers) returns (PlatformIdentifiers) {}
+}
+
+message FdsIdentifiers {
+  string fds_tenant_id = 1;
+  string fds_user_id = 2;
+  string fds_user_email = 3;
+}
+
+message PlatformIdentifiers {
+  string platform_tenant_id = 1;
+  string platform_user_id = 2;
+}

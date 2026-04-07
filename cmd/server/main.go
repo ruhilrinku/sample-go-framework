@@ -25,6 +25,8 @@ import (
 	lb "github.com/sample-go/item-service/config/liquibase"
 	"github.com/sample-go/item-service/config/session"
 	itemv1 "github.com/sample-go/item-service/gen/pb/item/v1"
+	fdsComposite "github.com/sample-go/item-service/internal/fds/adapter/composite"
+	fdsGRPC "github.com/sample-go/item-service/internal/fds/adapter/grpc"
 	fdsPostgres "github.com/sample-go/item-service/internal/fds/adapter/postgres"
 	fdsService "github.com/sample-go/item-service/internal/fds/core/service"
 	grpcadapter "github.com/sample-go/item-service/internal/items/adapter/grpc"
@@ -89,14 +91,30 @@ func main() {
 	itemSvc := service.New(itemRepo, logger)
 	itemServer := grpcadapter.NewItemServer(itemSvc, logger)
 
+	// FDS repository: always query the local postgres table first.
+	// When FDS_GRPC_URL is configured the local table acts as a write-through
+	// cache — on a miss the composite adapter calls the remote FDS gRPC service
+	// and stores the result locally so subsequent calls are served without a
+	// remote hop.
 	fdsRepo := fdsPostgres.NewPlatformFDSIdentifierMappingRepository(readerDB, writerDB, logger)
 	fdsSvc := fdsService.NewPlatformFDSIdentifierMapService(fdsRepo, logger)
-	_ = fdsSvc // available for injection into handlers that need FDS identity resolution
+
+	var fdsCacheRepo *fdsComposite.FDSCacheRepository
+	if cfg.FDSGRPCURL != "" {
+		fdsClient, conn, err := fdsGRPC.NewFDSGRPCClient(cfg.FDSGRPCURL, logger)
+		if err != nil {
+			logger.Error("failed to create FDS gRPC client", "url", cfg.FDSGRPCURL, "error", err)
+			os.Exit(1)
+		}
+		defer conn.Close()
+		logger.Info("FDS gRPC client connected — local cache will be checked before remote calls", "url", cfg.FDSGRPCURL)
+		fdsCacheRepo = fdsComposite.NewFDSCacheRepository(fdsSvc, fdsClient, logger)
+	}
 
 	// gRPC server with session and recovery interceptors
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
-			session.UnaryInterceptor(logger, cfg.FDSIssuer),
+			session.UnaryInterceptor(logger, cfg.FDSIssuer, fdsCacheRepo),
 			recoveryInterceptor(logger),
 		),
 	)

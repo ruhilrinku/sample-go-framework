@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/sample-go/item-service/internal/fds/adapter/composite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -76,7 +77,7 @@ func GatewayHeaderMatcher(key string) (string, bool) {
 //
 // NOTE: JWT signature verification is intentionally omitted here. Add JWKS-based
 // signature validation against the issuer's public keys before deploying to production.
-func UnaryInterceptor(logger *slog.Logger, fdsIssuer string) grpc.UnaryServerInterceptor {
+func UnaryInterceptor(logger *slog.Logger, fdsIssuer string, fdsCacheRepository *composite.FDSCacheRepository) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
 		req any,
@@ -98,7 +99,7 @@ func UnaryInterceptor(logger *slog.Logger, fdsIssuer string) grpc.UnaryServerInt
 		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
 			token := authHeader[7:] // trim "bearer " (7 chars, case-insensitive safe)
 			sess.JWT = token
-			if err := populateSessionFromJWT(ctx, sess, token, fdsIssuer, logger, info.FullMethod); err != nil {
+			if err := populateSessionFromJWT(ctx, sess, token, fdsIssuer, fdsCacheRepository, logger, info.FullMethod); err != nil {
 				logger.WarnContext(ctx, "JWT authentication failed",
 					"method", info.FullMethod, "error", err)
 				return nil, status.Error(codes.Unauthenticated, err.Error())
@@ -129,7 +130,7 @@ func UnaryInterceptor(logger *slog.Logger, fdsIssuer string) grpc.UnaryServerInt
 // All JWT payload entries are stored in sess.Claims as string values.
 // When the "iss" claim matches fdsIssuer the raw FDS identifiers are captured in
 // sess.FDSClaims for downstream FDS-to-platform identity resolution.
-func populateSessionFromJWT(_ context.Context, sess *RequestSession, token, fdsIssuer string, logger *slog.Logger, method string) error {
+func populateSessionFromJWT(ctx context.Context, sess *RequestSession, token, fdsIssuer string, fdsCacheRepository *composite.FDSCacheRepository, logger *slog.Logger, method string) error {
 	claims, err := decodeJWTPayload(token)
 	if err != nil {
 		return fmt.Errorf("invalid JWT: %w", err)
@@ -143,8 +144,6 @@ func populateSessionFromJWT(_ context.Context, sess *RequestSession, token, fdsI
 	sess.Claims = claimsStr
 
 	// Detect FDS-issued token and capture FDS-native identifiers.
-	// Downstream handlers that need platform UUIDs should check sess.FDSClaims != nil
-	// and call PlatformFDSIdentifierMapService.GetPlatformDetailsbyFDSIdentifiers.
 	if fdsIssuer != "" && stringClaim(claims, FDSClaimIssuer) == fdsIssuer {
 		sess.FDSClaims = &FDSClaims{
 			TenantID:  stringClaim(claims, FDSClaimTenantID),
@@ -158,25 +157,22 @@ func populateSessionFromJWT(_ context.Context, sess *RequestSession, token, fdsI
 		)
 	}
 
-	// Populate TenantID / UserID from standard JWT claims.
-	tenantIDStr := stringClaim(claims, ClaimTenantID)
-	userIDStr := stringClaim(claims, ClaimUserID)
-
-	if tenantIDStr != "" {
-		parsed, err := uuid.Parse(tenantIDStr)
-		if err != nil {
-			return fmt.Errorf("invalid tenant_id claim in JWT: %w", err)
-		}
-		sess.TenantID = parsed
-	}
-	if userIDStr != "" {
-		parsed, err := uuid.Parse(userIDStr)
-		if err != nil {
-			return fmt.Errorf("invalid user_id claim in JWT: %w", err)
-		}
-		sess.UserID = parsed
+	// PlatformFdsIdentifierMapService is responsible for resolving the raw FDS identifiers in sess.FDSClaims to platform TenantID and UserID.
+	// For simplicity, this interceptor assumes that the FDS tenant_id and user_id claims are UUIDs and directly populates TenantID and UserID from them.
+	// Adjust this logic as needed to fit the actual format of FDS identifiers and the resolution mechanism in your platform.
+	platformTenantId, platformUserId, err := fdsCacheRepository.GetPlatformDetailsbyFDSIdentifiers(ctx, sess.FDSClaims.TenantID, sess.FDSClaims.UserID)
+	if err != nil {
+		logger.ErrorContext(ctx, "failed to resolve platform identity from FDS identifiers",
+			"method", method,
+			"fdsTenantId", sess.FDSClaims.TenantID,
+			"fdsUserId", sess.FDSClaims.UserID,
+			"error", err,
+		)
+		return fmt.Errorf("failed to resolve platform identity from FDS identifiers: %w", err)
 	}
 
+	sess.TenantID = platformTenantId
+	sess.UserID = platformUserId
 	sess.Email = stringClaim(claims, ClaimEmail)
 	sess.CultureCode = stringClaim(claims, ClaimCultureCode)
 	return nil
