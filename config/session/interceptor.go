@@ -155,24 +155,37 @@ func populateSessionFromJWT(ctx context.Context, sess *RequestSession, token, fd
 			"fdsTenantId", sess.FDSClaims.TenantID,
 			"fdsUserId", sess.FDSClaims.UserID,
 		)
+
+		if fdsCacheRepository != nil {
+			tenantId, userId, err := fdsCacheRepository.GetPlatformDetailsbyFDSIdentifiers(ctx, sess.FDSClaims.TenantID, sess.FDSClaims.UserID)
+			if err != nil {
+				logger.ErrorContext(ctx, "failed to resolve platform identity from FDS identifiers",
+					"method", method,
+					"fdsTenantId", sess.FDSClaims.TenantID,
+					"fdsUserId", sess.FDSClaims.UserID,
+					"error", err,
+				)
+				return fmt.Errorf("failed to resolve platform identity from FDS identifiers: %w", err)
+			}
+			sess.TenantID = tenantId
+			sess.UserID = userId
+			sess.Email = stringClaim(claims, ClaimEmail)
+			sess.CultureCode = stringClaim(claims, ClaimCultureCode)
+			return nil
+		}
 	}
 
-	// PlatformFdsIdentifierMapService is responsible for resolving the raw FDS identifiers in sess.FDSClaims to platform TenantID and UserID.
-	// For simplicity, this interceptor assumes that the FDS tenant_id and user_id claims are UUIDs and directly populates TenantID and UserID from them.
-	// Adjust this logic as needed to fit the actual format of FDS identifiers and the resolution mechanism in your platform.
-	platformTenantId, platformUserId, err := fdsCacheRepository.GetPlatformDetailsbyFDSIdentifiers(ctx, sess.FDSClaims.TenantID, sess.FDSClaims.UserID)
+	// Standard JWT (or FDS token without a resolver): parse TenantID / UserID directly from claims.
+	parsedTenantID, err := uuid.Parse(stringClaim(claims, ClaimTenantID))
 	if err != nil {
-		logger.ErrorContext(ctx, "failed to resolve platform identity from FDS identifiers",
-			"method", method,
-			"fdsTenantId", sess.FDSClaims.TenantID,
-			"fdsUserId", sess.FDSClaims.UserID,
-			"error", err,
-		)
-		return fmt.Errorf("failed to resolve platform identity from FDS identifiers: %w", err)
+		return fmt.Errorf("invalid tenant_id in JWT: %w", err)
 	}
-
-	sess.TenantID = platformTenantId
-	sess.UserID = platformUserId
+	parsedUserID, err := uuid.Parse(stringClaim(claims, ClaimUserID))
+	if err != nil {
+		return fmt.Errorf("invalid user_id in JWT: %w", err)
+	}
+	sess.TenantID = parsedTenantID
+	sess.UserID = parsedUserID
 	sess.Email = stringClaim(claims, ClaimEmail)
 	sess.CultureCode = stringClaim(claims, ClaimCultureCode)
 	return nil

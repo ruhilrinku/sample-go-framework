@@ -15,7 +15,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/sample-go/item-service/config/session"
-	"github.com/sample-go/item-service/internal/fds/adapter/composite"
 )
 
 var (
@@ -33,7 +32,7 @@ func noopHandler(ctx context.Context, _ any) (any, error) {
 
 func invokeInterceptor(md metadata.MD, fdsIssuer string) (*session.RequestSession, error) {
 	ctx := metadata.NewIncomingContext(context.Background(), md)
-	interceptor := session.UnaryInterceptor(slog.Default(), fdsIssuer, &composite.FDSCacheRepository{})
+	interceptor := session.UnaryInterceptor(slog.Default(), fdsIssuer, nil)
 
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
 	resp, err := interceptor(ctx, nil, info, noopHandler)
@@ -68,7 +67,7 @@ func TestUnaryInterceptor_Success_Headers(t *testing.T) {
 }
 
 func TestUnaryInterceptor_MissingMetadata(t *testing.T) {
-	interceptor := session.UnaryInterceptor(slog.Default(), "", &composite.FDSCacheRepository{})
+	interceptor := session.UnaryInterceptor(slog.Default(), "", nil)
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}
 	_, err := interceptor(context.Background(), nil, info, noopHandler)
 	if err == nil {
