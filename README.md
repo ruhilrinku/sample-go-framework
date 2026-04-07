@@ -78,6 +78,8 @@ Key design decisions:
 │       │   ├── port/                        # PlatformFdsIdentifierMapService & Repository interfaces
 │       │   └── service/                     # FDS-to-platform identity resolution service
 │       └── adapter/
+│           ├── composite/                   # FDSCacheRepository: local-first lookup with remote fallback
+│           ├── grpc/                        # FDS gRPC client adapter (calls external FDS service)
 │           └── postgres/                    # FDS identifier mapping repository & data model
 ├── test/                                    # Cucumber/BDD integration tests
 │   ├── item_server_cucumber_test.go         # Godog step definitions & test runner
@@ -113,6 +115,7 @@ Configuration is loaded from `app.properties` with environment variable override
 | `http_port`            | `8080`                                               | HTTP REST gateway port           |
 | `liquibase_changelog`  | `db-migrations/changelog-master.yaml`                | Path to migration changelog      |
 | `fds_issuer`           | *(empty)*                                            | JWT `iss` claim value for FDS-issued tokens; enables FDS platform identity resolution when set |
+| `fds_grpc_url`         | *(empty)*                                            | FDS gRPC service endpoint (`host:port`); when set, enables remote identity resolution with local write-through cache |
 
 ## Getting Started
 
@@ -299,17 +302,46 @@ The `internal/fds/` package implements a self-contained hexagonal slice for reso
 ### Wiring
 
 ```
-PlatformFdsIdentifierMapRepository (port)
-    └── implemented by: fds/adapter/postgres.PlatformFdsIdentifierMapRepository
+fds/adapter/postgres.PlatformFDSIdentifierMappingRepository
+    └── implements: port.PlatformFdsIdentifierMapRepository (local persistence)
 
-PlatformFdsIdentifierMapService (port)
-    └── implemented by: fds/core/service.PlatformFDSIdentifierMapService
-            └── depends on: PlatformFdsIdentifierMapRepository
+fds/core/service.PlatformFDSIdentifierMapService
+    └── implements: port.PlatformFdsIdentifierMapService
+    └── depends on: port.PlatformFdsIdentifierMapRepository
 
-session.PlatformFDSIdentifierMapService (wrapper)
-    └── wraps: fds/core/port.PlatformFdsIdentifierMapService
+fds/adapter/grpc.FDSGRPCClient          (created only when fds_grpc_url is configured)
+    └── implements: port.PlatformFdsIdentifierMapRepository (remote FDS service)
+    └── dials: external FDS gRPC service at fds_grpc_url
+
+fds/adapter/composite.FDSCacheRepository  (created only when fds_grpc_url is configured)
+    └── local:  port.PlatformFdsIdentifierMapService  (postgres service — checked first)
+    └── remote: port.PlatformFdsIdentifierMapRepository (gRPC client — fallback on miss)
+    └── on cache miss: writes resolved mapping back to local postgres table
     └── injected into: session.UnaryInterceptor
 ```
+
+### FDS Identity Resolution Strategy
+
+When `fds_grpc_url` is configured, identity resolution follows a **local-first, write-through cache** pattern:
+
+1. Look up `(fds_tenant_id, fds_user_id)` in the local `platform_fds_identifier_mapping` postgres table.
+2. On a **cache hit**: return the locally stored `(platform_tenant_id, platform_user_id)` immediately.
+3. On a **cache miss** (`ErrRecordNotFound`): call the external FDS gRPC service (`FdsService.GetPlatformIdentifiers`).
+4. Persist the remotely resolved mapping back to the local table (write-through, `ON CONFLICT DO NOTHING`).
+5. Any unexpected DB error propagates immediately without falling through to the remote service.
+
+When `fds_grpc_url` is **not** configured, no `FDSCacheRepository` is wired. If an FDS-issued JWT arrives and no resolver is available, the interceptor attempts to parse `tenant_id` / `user_id` as standard UUID claims, which typically fails for FDS tokens.
+
+### FDS gRPC Client
+
+`fds/adapter/grpc.FDSGRPCClient` is a driven adapter that wraps the generated `FdsServiceClient` (from `gen/pb/fds/v1/`) and translates gRPC calls to the `port.PlatformFdsIdentifierMapRepository` interface:
+
+| gRPC Method | Adapter Method | Description |
+|---|---|---|
+| `FdsService.GetPlatformIdentifiers` | `GetPlatformDetailsbyFDSIdentifiers` | Resolves FDS identifiers to platform UUIDs |
+| *(no-op)* | `CreatePlatformFdsIdentifierMapping` | Mappings are managed locally; gRPC adapter is read-only |
+
+The client uses insecure credentials by default — add TLS configuration before deploying to production.
 
 ### Service methods
 
@@ -417,9 +449,9 @@ The project includes unit tests and BDD (Cucumber) narrow integration tests with
 
 - **Service layer** (`internal/items/core/service/item_service_test.go`) — 7 tests covering `ListItems` (success, error, page defaults, page cap) and `CreateItem` (success, empty name validation, repository error)
 - **gRPC adapter** (`internal/items/adapter/grpc/item_server_test.go`) — 8 tests covering `ListItems` (success, error, empty result, not found) and `CreateItem` (success, empty name, service error, validation error)
-- **Session interceptor** (`internal/session/interceptor_test.go`) — 29 tests across:
+- **Session interceptor** (`config/session/interceptor_test.go`) — 29 tests across:
   - *Header auth (7):* success, missing metadata, missing tenant, missing user, empty values, invalid tenant UUID, invalid user UUID
-  - *JWT auth (6):* success, FDS issuer match populates `FDSClaims`, FDS issuer mismatch, malformed token, invalid UUID in claims, FDS resolution path
+  - *JWT auth (5):* success, FDS issuer match populates `FDSClaims`, FDS issuer mismatch, malformed token, invalid UUID in claims
   - *Traces (2):* headers populate all trace fields, absent headers yield empty traces
   - *Claims map (2):* headers and JWT both populate `Claims`
   - *JWT storage (2):* raw token stored for Bearer auth, empty for header auth
